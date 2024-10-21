@@ -16,6 +16,7 @@ type Demo struct {
 }
 
 type Data struct {
+	Target    uint32
 	Timestamp byte
 	Command   byte
 	Cmd       *Cmd
@@ -85,6 +86,7 @@ func Parse(ctx *context.Context, data []byte) (*Demo, error) {
 			if data.Multiple, err = parseMultiple(ctx, buf); err != nil {
 				return nil, err
 			}
+			data.Target = data.Multiple.LastTo
 
 			if data.Multiple.IsHiddenPacket {
 				cmd.Data = append(cmd.Data, data)
@@ -100,6 +102,10 @@ func Parse(ctx *context.Context, data []byte) (*Demo, error) {
 		case mvd.DemoStats:
 			fallthrough
 		case mvd.DemoSingle:
+			// Target determines which client the data is intended
+			// to reach and can be used in conjunction with the
+			// updateuserinfo to determine who the client is.
+			data.Target = uint32(data.Command >> 3)
 			fallthrough
 		case mvd.DemoAll:
 			fallthrough
