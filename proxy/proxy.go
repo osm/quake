@@ -22,7 +22,7 @@ import (
 )
 
 const maxPacketSize = 8192
-const maxInjectionSize = maxPacketSize - 4096
+const maxInjectionSize = 512
 
 type HandlerType byte
 
