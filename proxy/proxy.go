@@ -21,7 +21,7 @@ import (
 	"github.com/osm/quake/protocol"
 )
 
-const maxPacketSize = 8191
+const maxPacketSize = 8192
 const maxInjectionSize = maxPacketSize - 4096
 
 type HandlerType byte
