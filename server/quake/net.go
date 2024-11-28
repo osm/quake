@@ -27,6 +27,18 @@ func (s *Server) ListenAndServe(addrPort string) error {
 	}
 	s.conn = conn
 
+	go func() {
+		for {
+			for _, c := range s.clients {
+				if time.Since(c.lastWrite).Seconds() > float64(5) {
+					delete(s.clients, c.addr.String())
+				}
+			}
+
+			time.Sleep(time.Second * 60)
+		}
+	}()
+
 	buf := make([]byte, 1024*64)
 	ctx := context.New(context.WithProtocolVersion(protocol.VersionQW))
 	for {
@@ -73,12 +85,6 @@ func (s *Server) ListenAndServe(addrPort string) error {
 		}
 
 		s.processCommands(c, incomingSeq, incomingAck, clientCmds)
-
-		for _, c := range s.clients {
-			if time.Since(c.lastWrite).Seconds() > float64(5) {
-				delete(s.clients, c.addr.String())
-			}
-		}
 	}
 }
 
@@ -129,5 +135,6 @@ func (s *Server) processCommands(
 		s.logger.Printf("unable to write data to socket, %v", err)
 	}
 
+	client.lastWrite = time.Now()
 	client.cmds = []command.Command{}
 }
