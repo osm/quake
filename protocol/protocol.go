@@ -1,8 +1,9 @@
 package protocol
 
 const (
-	VersionNQ uint32 = 15
-	VersionQW uint32 = 28
+	VersionNQ    uint32 = 15
+	VersionQW210 uint32 = 25
+	VersionQW    uint32 = 28
 )
 
 type CommandType int
