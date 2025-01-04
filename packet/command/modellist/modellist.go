@@ -7,23 +7,32 @@ import (
 )
 
 type Command struct {
-	NumModels byte
-	Models    []string
-	Index     byte
+	ProtocolVersion uint32
+	NumModels       byte
+	Models          []string
+	Index           byte
 }
 
 func (cmd *Command) Bytes() []byte {
 	buf := buffer.New()
 
 	buf.PutByte(protocol.SVCModelList)
-	buf.PutByte(cmd.NumModels)
 
-	for i := 0; i < len(cmd.Models); i++ {
-		buf.PutString(cmd.Models[i])
+	if cmd.ProtocolVersion >= 26 {
+		buf.PutByte(cmd.NumModels)
+
+		for i := 0; i < len(cmd.Models); i++ {
+			buf.PutString(cmd.Models[i])
+		}
+		buf.PutByte(0x00)
+
+		buf.PutByte(cmd.Index)
+	} else {
+		for i := 0; i < len(cmd.Models); i++ {
+			buf.PutString(cmd.Models[i])
+		}
+		buf.PutByte(0x00)
 	}
-	buf.PutByte(0x00)
-
-	buf.PutByte(cmd.Index)
 
 	return buf.Bytes()
 }
@@ -32,25 +41,42 @@ func Parse(ctx *context.Context, buf *buffer.Buffer) (*Command, error) {
 	var err error
 	var cmd Command
 
-	if cmd.NumModels, err = buf.ReadByte(); err != nil {
-		return nil, err
-	}
+	cmd.ProtocolVersion = ctx.GetProtocolVersion()
 
-	for {
-		var model string
-		if model, err = buf.GetString(); err != nil {
+	if cmd.ProtocolVersion >= 26 {
+		if cmd.NumModels, err = buf.ReadByte(); err != nil {
 			return nil, err
 		}
 
-		if model == "" {
-			break
+		for {
+			var model string
+			if model, err = buf.GetString(); err != nil {
+				return nil, err
+			}
+
+			if model == "" {
+				break
+			}
+
+			cmd.Models = append(cmd.Models, model)
 		}
 
-		cmd.Models = append(cmd.Models, model)
-	}
+		if cmd.Index, err = buf.ReadByte(); err != nil {
+			return nil, err
+		}
+	} else {
+		for {
+			var model string
+			if model, err = buf.GetString(); err != nil {
+				return nil, err
+			}
 
-	if cmd.Index, err = buf.ReadByte(); err != nil {
-		return nil, err
+			if model == "" {
+				break
+			}
+
+			cmd.Models = append(cmd.Models, model)
+		}
 	}
 
 	return &cmd, nil
