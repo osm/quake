@@ -153,7 +153,7 @@ func Parse(ctx *context.Context, buf *buffer.Buffer) (*Command, error) {
 			continue
 		}
 
-		if pv == protocol.VersionNQ || pv == protocol.VersionQW {
+		if pv == protocol.VersionNQ || pv == protocol.VersionQW || pv == protocol.VersionQW210 {
 			cmd.ProtocolVersion = pv
 			ctx.SetProtocolVersion(cmd.ProtocolVersion)
 			break
