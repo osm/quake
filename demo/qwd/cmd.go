@@ -29,12 +29,13 @@ func (cmd *Cmd) Bytes() []byte {
 	buf.PutUint16(cmd.Forward)
 	buf.PutUint16(cmd.Side)
 	buf.PutUint16(cmd.Up)
-	buf.PutByte(cmd.Buttons)
-	buf.PutByte(cmd.Impulse)
 
 	for i := 0; i < 3; i++ {
 		buf.PutByte(cmd.Padding[i])
 	}
+
+	buf.PutByte(cmd.Buttons)
+	buf.PutByte(cmd.Impulse)
 
 	for i := 0; i < 3; i++ {
 		buf.PutFloat32(cmd.Angle[i])
@@ -69,18 +70,18 @@ func parseCmd(ctx *context.Context, buf *buffer.Buffer) (*Cmd, error) {
 		return nil, err
 	}
 
+	for i := 0; i < 3; i++ {
+		if cmd.Padding[i], err = buf.ReadByte(); err != nil {
+			return nil, err
+		}
+	}
+
 	if cmd.Buttons, err = buf.ReadByte(); err != nil {
 		return nil, err
 	}
 
 	if cmd.Impulse, err = buf.ReadByte(); err != nil {
 		return nil, err
-	}
-
-	for i := 0; i < 3; i++ {
-		if cmd.Padding[i], err = buf.ReadByte(); err != nil {
-			return nil, err
-		}
 	}
 
 	for i := 0; i < 3; i++ {
