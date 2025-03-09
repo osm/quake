@@ -31,6 +31,10 @@ var qwdTests = []qwdTest{
 		filePath: "testdata/demo4.qwd",
 		checksum: "6b9088a13fc08609ca58e9887379e743beae0c0752939c001ac35d81a8f9c5af",
 	},
+	{
+		filePath: "testdata/demo5.qwd",
+		checksum: "698b1961ee8ac009fff062255cece5ab6729c50df9f6ece2d1cf7f1c52406c13",
+	},
 }
 
 func TestParse(t *testing.T) {
