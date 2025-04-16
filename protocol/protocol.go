@@ -3,6 +3,7 @@ package protocol
 const (
 	VersionNQ    uint32 = 15
 	VersionQW210 uint32 = 25
+	VersionQW221 uint32 = 26
 	VersionQW    uint32 = 28
 )
 
