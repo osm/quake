@@ -28,6 +28,7 @@ type Command struct {
 	Coord      [3]float32
 	Angle      [3]float32
 	Trans      byte
+	ColorMod   [3]byte
 }
 
 func (cmd *Command) Bytes() []byte {
@@ -108,6 +109,12 @@ func (cmd *Command) Bytes() []byte {
 
 	if moreBits&fte.UTrans != 0 && cmd.FTEProtocolExtension&fte.ExtensionTrans != 0 {
 		buf.PutByte(cmd.Trans)
+	}
+
+	if moreBits&fte.UColorMod != 0 && cmd.FTEProtocolExtension&fte.ExtensionColorMod != 0 {
+		for i := 0; i < len(cmd.ColorMod); i++ {
+			buf.PutByte(cmd.ColorMod[i])
+		}
 	}
 
 	return buf.Bytes()
@@ -230,6 +237,14 @@ func Parse(ctx *context.Context, buf *buffer.Buffer, bits uint16) (*Command, err
 	if moreBits&fte.UTrans != 0 && cmd.FTEProtocolExtension&fte.ExtensionTrans != 0 {
 		if cmd.Trans, err = buf.ReadByte(); err != nil {
 			return nil, err
+		}
+	}
+
+	if moreBits&fte.UColorMod != 0 && cmd.FTEProtocolExtension&fte.ExtensionColorMod != 0 {
+		for i := 0; i < len(cmd.ColorMod); i++ {
+			if cmd.ColorMod[i], err = buf.ReadByte(); err != nil {
+				return nil, err
+			}
 		}
 	}
 

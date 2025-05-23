@@ -73,7 +73,7 @@ const (
 	UYetMore    = 1 << 7
 	UDrawFlags  = 1 << 8
 	UAbsLight   = 1 << 9
-	UColourMod  = 1 << 10
+	UColorMod   = 1 << 10
 	UDPFlags    = 1 << 11
 	UTagInfo    = 1 << 12
 	ULight      = 1 << 13

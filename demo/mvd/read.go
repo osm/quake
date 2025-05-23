@@ -13,7 +13,7 @@ type Read struct {
 }
 
 func (cmd *Read) Bytes() []byte {
-	if cmd.Packet == nil {
+	if cmd == nil || cmd.Packet == nil {
 		return []byte{}
 	}
 

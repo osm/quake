@@ -27,6 +27,10 @@ var mvdTests = []mvdTest{
 		filePath: "testdata/demo3.mvd",
 		checksum: "3dd728aa90fdae100ade62d9b93220b7689f6ebdca6c986d3c2b1208b4e1e33c",
 	},
+	{
+		filePath: "testdata/demo4.mvd",
+		checksum: "1f7b2c0ad77608f431028c8e68904400fe406150875a51f793f3395bf3784c90",
+	},
 }
 
 func TestParse(t *testing.T) {
