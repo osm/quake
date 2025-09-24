@@ -1,11 +1,13 @@
 package main
 
 import (
+	"compress/gzip"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/osm/quake/common/ascii"
 	"github.com/osm/quake/common/context"
@@ -17,6 +19,55 @@ import (
 	"github.com/osm/quake/packet/svc"
 )
 
+var validExts = []string{".dem", ".mvd", ".qwd"}
+
+func isValidExt(ext string) bool {
+	return slices.Contains(validExts, ext)
+}
+
+func readGzipFile(file string) ([]byte, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	defer gzr.Close()
+
+	return io.ReadAll(gzr)
+}
+
+func readDemoFile(file string) ([]byte, string, error) {
+	ext := filepath.Ext(file)
+
+	switch ext {
+	case ".gz":
+		innerExt := filepath.Ext(strings.TrimSuffix(file, ext))
+		if !isValidExt(innerExt) {
+			return nil, "", fmt.Errorf("unsupported extension %q", innerExt)
+		}
+		data, err := readGzipFile(file)
+		if err != nil {
+			return nil, "", err
+		}
+		return data, innerExt, nil
+
+	default:
+		if !isValidExt(ext) {
+			return nil, "", fmt.Errorf("unsupported extension %q", ext)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, "", err
+		}
+		return data, ext, nil
+	}
+}
+
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <demo file>\n", os.Args[0])
@@ -24,13 +75,7 @@ func main() {
 	}
 	file := os.Args[1]
 
-	ext := filepath.Ext(file)
-	if !slices.Contains([]string{".dem", ".mvd", ".qwd"}, ext) {
-		fmt.Fprintf(os.Stderr, "unsupported extension \"%s\"\n", ext)
-		os.Exit(1)
-	}
-
-	data, err := ioutil.ReadFile(file)
+	data, ext, err := readDemoFile(file)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "unable to read file, %v", err)
 		os.Exit(1)
