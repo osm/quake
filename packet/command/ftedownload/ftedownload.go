@@ -4,22 +4,27 @@ import (
 	"github.com/osm/quake/common/buffer"
 	"github.com/osm/quake/common/context"
 	"github.com/osm/quake/packet/command/download"
+	"github.com/osm/quake/protocol"
 )
 
 type Command struct {
-	Number  int32
-	Command byte
-	Chunk   *download.Command
+	Number     int32
+	DownloadID int32
+	Command    byte
+	Chunk      *download.Command
 }
 
 func (cmd *Command) Bytes() []byte {
 	buf := buffer.New()
 
-	buf.PutString("\\chunk")
-	buf.PutInt32(cmd.Number)
-	buf.PutByte(cmd.Command)
+	buf.PutByte(protocol.A2CPrint)
+	buf.PutBytes([]byte("\\chunk"))
+	buf.PutInt32(cmd.DownloadID)
+
 	if cmd.Chunk != nil {
-		buf.PutBytes(cmd.Chunk.Bytes())
+		buf.PutByte(cmd.Command)
+		buf.PutInt32(cmd.Number)
+		buf.PutBytes(cmd.Chunk.Data)
 	}
 
 	return buf.Bytes()
