@@ -47,8 +47,10 @@ type Client struct {
 	connect *connect.Command
 	count   int
 
-	CLCInject CommandQueue
-	SVCInject CommandQueue
+	CLCInject    CommandQueue
+	SVCInject    CommandQueue
+	OOBCLCInject CommandQueue
+	OOBSVCInject CommandQueue
 }
 
 func (c *Client) Address() string { return c.addr.String() }
@@ -152,6 +154,18 @@ func (p *Proxy) Serve(addrPort string) error {
 
 		if _, err := client.conn.Write(packet.Bytes()); err != nil {
 			p.logger.Printf("unable to write command, %v\n", err)
+		}
+
+		for {
+			c := client.OOBCLCInject.Dequeue()
+			if c == nil {
+				break
+			}
+
+			oob := &svc.Connectionless{Command: c}
+			if _, err := client.conn.Write(oob.Bytes()); err != nil {
+				p.logger.Printf("unable to write oob data, %v\n", err)
+			}
 		}
 	}
 }
@@ -267,6 +281,18 @@ func (p *Proxy) handlePeer(client *Client) {
 
 		if _, err := p.conn.WriteToUDP(packet.Bytes(), client.addr); err != nil {
 			p.logger.Printf("unable to write data, %v\n", err)
+		}
+
+		for {
+			c := client.OOBSVCInject.Dequeue()
+			if c == nil {
+				break
+			}
+
+			oob := &svc.Connectionless{Command: c}
+			if _, err := p.conn.WriteToUDP(oob.Bytes(), client.addr); err != nil {
+				p.logger.Printf("unable to write oob data, %v\n", err)
+			}
 		}
 	}
 }
