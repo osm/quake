@@ -14,7 +14,8 @@ type Command struct {
 	FTEProtocolExtension uint32
 	MVDProtocolExtension uint32
 
-	bits uint16
+	bits   uint16
+	Number uint16
 
 	MoreBits     byte
 	EvenMoreBits byte
@@ -139,6 +140,7 @@ func Parse(ctx *context.Context, buf *buffer.Buffer, bits uint16) (*Command, err
 		readCoord = buf.GetCoord32
 	}
 
+	cmd.Number = bits & 511
 	cmd.bits = bits
 
 	bits &= ^uint16(511)
