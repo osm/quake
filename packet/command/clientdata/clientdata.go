@@ -17,8 +17,11 @@ type Command struct {
 	Armor        byte
 	Weapon       byte
 	Health       uint16
-	Ammo         byte
-	Shells       [4]byte
+	ActiveAmmo   byte
+	AmmoShells   byte
+	AmmoNails    byte
+	AmmoRockets  byte
+	AmmoCells    byte
 	ActiveWeapon byte
 }
 
@@ -63,12 +66,11 @@ func (cmd *Command) Bytes() []byte {
 	}
 
 	buf.PutUint16(cmd.Health)
-	buf.PutByte(cmd.Ammo)
-
-	for i := 0; i < 4; i++ {
-		buf.PutByte(cmd.Shells[i])
-	}
-
+	buf.PutByte(cmd.ActiveAmmo)
+	buf.PutByte(cmd.AmmoShells)
+	buf.PutByte(cmd.AmmoNails)
+	buf.PutByte(cmd.AmmoRockets)
+	buf.PutByte(cmd.AmmoCells)
 	buf.PutByte(cmd.ActiveWeapon)
 
 	return buf.Bytes()
@@ -134,14 +136,24 @@ func Parse(ctx *context.Context, buf *buffer.Buffer) (*Command, error) {
 		return nil, err
 	}
 
-	if cmd.Ammo, err = buf.ReadByte(); err != nil {
+	if cmd.ActiveAmmo, err = buf.ReadByte(); err != nil {
 		return nil, err
 	}
 
-	for i := 0; i < 4; i++ {
-		if cmd.Shells[i], err = buf.ReadByte(); err != nil {
-			return nil, err
-		}
+	if cmd.AmmoShells, err = buf.ReadByte(); err != nil {
+		return nil, err
+	}
+
+	if cmd.AmmoNails, err = buf.ReadByte(); err != nil {
+		return nil, err
+	}
+
+	if cmd.AmmoRockets, err = buf.ReadByte(); err != nil {
+		return nil, err
+	}
+
+	if cmd.AmmoCells, err = buf.ReadByte(); err != nil {
+		return nil, err
 	}
 
 	if cmd.ActiveWeapon, err = buf.ReadByte(); err != nil {
