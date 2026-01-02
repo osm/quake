@@ -15,6 +15,15 @@ func (b *Buffer) PutBytes(v []byte) {
 	b.buf = append(b.buf, v...)
 }
 
+func (b *Buffer) PutInt8(v int8) {
+	b.PutUint8(uint8(v))
+}
+
+func (b *Buffer) PutUint8(v uint8) {
+	b.off++
+	b.buf = append(b.buf, v)
+}
+
 func (b *Buffer) PutInt16(v int16) {
 	b.PutUint16(uint16(v))
 }

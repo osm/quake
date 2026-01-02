@@ -26,6 +26,25 @@ func (b *Buffer) GetBytes(n int) ([]byte, error) {
 	return r, nil
 }
 
+func (b *Buffer) GetUint8() (uint8, error) {
+	if b.off+1 > len(b.buf) {
+		return 0, ErrBadRead
+	}
+
+	r := b.buf[b.off]
+	b.off++
+	return r, nil
+}
+
+func (b *Buffer) GetInt8() (int8, error) {
+	r, err := b.GetUint8()
+	if err != nil {
+		return 0, err
+	}
+
+	return int8(r), nil
+}
+
 func (b *Buffer) GetInt16() (int16, error) {
 	r, err := b.GetUint16()
 	if err != nil {
