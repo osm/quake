@@ -6,6 +6,7 @@ import (
 
 	"github.com/osm/quake/common/buffer"
 	"github.com/osm/quake/common/lump"
+	"github.com/osm/quake/common/lump/typ"
 )
 
 var ErrIncorrectMagic = errors.New("incorrect magic")
@@ -20,7 +21,7 @@ var magic = []byte("WAD2")
 
 type Entry struct {
 	Name        string
-	Type        uint8
+	Type        typ.Type
 	Compression uint8
 	Lump        lump.LumpData
 }
@@ -54,7 +55,7 @@ func (w *Wad) Bytes() []byte {
 		buf.PutUint32(currentOffset)
 		buf.PutUint32(size)
 		buf.PutUint32(size)
-		buf.PutUint8(e.Type)
+		buf.PutUint8(uint8(e.Type))
 		buf.PutUint8(e.Compression)
 		buf.PutUint16(0) // Padding
 
@@ -113,10 +114,11 @@ func Parse(data []byte) (*Wad, error) {
 			return nil, err
 		}
 
-		ltype, err := buf.GetUint8()
+		lt, err := buf.GetUint8()
 		if err != nil {
 			return nil, err
 		}
+		ltype := typ.Type(lt)
 
 		comp, err := buf.GetUint8()
 		if err != nil {

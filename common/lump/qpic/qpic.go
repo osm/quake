@@ -6,6 +6,7 @@ import (
 
 	"github.com/osm/quake/common/buffer"
 	"github.com/osm/quake/common/lump/image"
+	"github.com/osm/quake/common/lump/typ"
 )
 
 const (
@@ -20,6 +21,10 @@ type QPic struct {
 	Width  int
 	Height int
 	Pixels []byte
+}
+
+func (q *QPic) Type() typ.Type {
+	return typ.QPic
 }
 
 func (q *QPic) Bytes() []byte {

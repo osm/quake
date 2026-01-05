@@ -5,14 +5,7 @@ import (
 
 	"github.com/osm/quake/common/lump/miptex"
 	"github.com/osm/quake/common/lump/qpic"
-)
-
-const (
-	Palette = 64
-	QTex    = 65
-	QPic    = 66
-	Sound   = 67
-	MipTex  = 68
+	"github.com/osm/quake/common/lump/typ"
 )
 
 var (
@@ -22,13 +15,14 @@ var (
 type LumpData interface {
 	Bytes() []byte
 	ToPNG() ([]byte, error)
+	Type() typ.Type
 }
 
-func Parse(typ uint8, data []byte) (LumpData, error) {
-	switch typ {
-	case QPic:
+func Parse(t typ.Type, data []byte) (LumpData, error) {
+	switch t {
+	case typ.QPic:
 		return qpic.Parse(data)
-	case MipTex:
+	case typ.MipTex:
 		return miptex.Parse(miptex.DefaultWidth, miptex.DefaultHeight, data)
 	}
 

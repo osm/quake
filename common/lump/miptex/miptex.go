@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/osm/quake/common/lump/image"
+	"github.com/osm/quake/common/lump/typ"
 )
 
 const (
@@ -20,6 +21,10 @@ type MipTex struct {
 	Width  int
 	Height int
 	Pixels []byte
+}
+
+func (m *MipTex) Type() typ.Type {
+	return typ.MipTex
 }
 
 func (m *MipTex) Bytes() []byte {
