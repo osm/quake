@@ -1,4 +1,4 @@
-package rgba
+package image
 
 import (
 	"bytes"
@@ -24,12 +24,13 @@ type Image struct {
 	Pixels []byte
 }
 
-func (rgba *Image) ToPNG() ([]byte, error) {
-	if rgba.Pixels == nil {
+func ToPNG(width, height int, pixels []byte) ([]byte, error) {
+	if pixels == nil {
 		return nil, ErrNoImageData
 	}
 
-	img := image.NewRGBA(image.Rect(0, 0, rgba.Width, rgba.Height))
+	rgba := toImage(width, height, pixels)
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	copy(img.Pix, rgba.Pixels)
 
 	var buf bytes.Buffer
@@ -38,24 +39,6 @@ func (rgba *Image) ToPNG() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
-}
-
-func ToImage(width, height int, pixels []byte) *Image {
-	rgba := &Image{
-		Width:  width,
-		Height: height,
-		Pixels: make([]byte, width*height*4),
-	}
-
-	for i, paletteIndex := range pixels {
-		offset := i * 4
-		rgba.Pixels[offset] = palette.Palette[paletteIndex].R
-		rgba.Pixels[offset+1] = palette.Palette[paletteIndex].G
-		rgba.Pixels[offset+2] = palette.Palette[paletteIndex].B
-		rgba.Pixels[offset+3] = calculateAlpha(int(paletteIndex))
-	}
-
-	return rgba
 }
 
 func FromPNG(data []byte) (*Image, error) {
@@ -85,6 +68,24 @@ func FromPNG(data []byte) (*Image, error) {
 		Height: height,
 		Pixels: indexed,
 	}, nil
+}
+
+func toImage(width, height int, pixels []byte) *Image {
+	rgba := &Image{
+		Width:  width,
+		Height: height,
+		Pixels: make([]byte, width*height*4),
+	}
+
+	for i, paletteIndex := range pixels {
+		offset := i * 4
+		rgba.Pixels[offset] = palette.Palette[paletteIndex].R
+		rgba.Pixels[offset+1] = palette.Palette[paletteIndex].G
+		rgba.Pixels[offset+2] = palette.Palette[paletteIndex].B
+		rgba.Pixels[offset+3] = calculateAlpha(int(paletteIndex))
+	}
+
+	return rgba
 }
 
 func toIndexed(width, height int, pixels []byte) ([]byte, error) {

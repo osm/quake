@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/osm/quake/common/buffer"
-	"github.com/osm/quake/common/lump/rgba"
+	"github.com/osm/quake/common/lump/image"
 )
 
 const (
@@ -30,10 +30,6 @@ func (q *QPic) Bytes() []byte {
 	buf.PutBytes(q.Pixels)
 
 	return buf.Bytes()
-}
-
-func (q *QPic) ToRGBAImage() *rgba.Image {
-	return rgba.ToImage(q.Width, q.Height, q.Pixels)
 }
 
 func Parse(data []byte) (*QPic, error) {
@@ -71,15 +67,19 @@ func Parse(data []byte) (*QPic, error) {
 	}, nil
 }
 
+func (q *QPic) ToPNG() ([]byte, error) {
+	return image.ToPNG(q.Width, q.Height, q.Pixels)
+}
+
 func FromPNG(data []byte) (*QPic, error) {
-	rgba, err := rgba.FromPNG(data)
+	img, err := image.FromPNG(data)
 	if err != nil {
 		return nil, err
 	}
 
 	return &QPic{
-		Width:  rgba.Width,
-		Height: rgba.Height,
-		Pixels: rgba.Pixels,
+		Width:  img.Width,
+		Height: img.Height,
+		Pixels: img.Pixels,
 	}, nil
 }

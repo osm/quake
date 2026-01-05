@@ -5,7 +5,6 @@ import (
 
 	"github.com/osm/quake/common/lump/miptex"
 	"github.com/osm/quake/common/lump/qpic"
-	"github.com/osm/quake/common/lump/rgba"
 )
 
 const (
@@ -22,7 +21,7 @@ var (
 
 type LumpData interface {
 	Bytes() []byte
-	ToRGBAImage() *rgba.Image
+	ToPNG() ([]byte, error)
 }
 
 func Parse(typ uint8, data []byte) (LumpData, error) {
