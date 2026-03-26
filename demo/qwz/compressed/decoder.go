@@ -26,17 +26,30 @@ type decoder struct {
 	packetScale        int
 }
 
-func Decode(
+type Decoder struct {
+	outer *rangedec.Decoder
+	ft    *freq.Tables
+	state *state.Packet
+}
+
+func New(
 	outer *rangedec.Decoder,
 	ft *freq.Tables,
 	st *state.Packet,
-	seq, ack uint32,
-) ([]byte, error) {
-	rd := *outer
-	decoder := &decoder{
+) *Decoder {
+	return &Decoder{
+		outer: outer,
+		ft:    ft,
+		state: st,
+	}
+}
+
+func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
+	rd := *d.outer
+	packetDecoder := &decoder{
 		rd:                  &rd,
-		ft:                  ft,
-		state:               st,
+		ft:                  d.ft,
+		state:               d.state,
 		lastPlayerIndex:     0xff,
 		lastPingPlayerIndex: 0xff,
 		lastPLPlayerIndex:   0xff,
@@ -44,7 +57,7 @@ func Decode(
 
 	out := make([]byte, 0, 8192)
 
-	st.BeginPacket(seq)
+	d.state.BeginPacket(seq)
 
 	out = append(out, 0x00, 0x00, 0x00, 0x00)
 
@@ -52,15 +65,18 @@ func Decode(
 	out = appendUint32LE(out, ack)
 
 	out = append(out, 0x2a)
-	body, err := decoder.decodeSVCPlayerInfo()
+	body, err := packetDecoder.decodeSVCPlayerInfo()
 	if err != nil {
 		return nil, err
 	}
 	out = append(out, body...)
-	decoder.refreshPacketContext()
+	packetDecoder.refreshPacketContext()
 
 	for {
-		svcCode, err := decoder.rd.DecodeFreqByte(decoder.ft, freq.SVCType)
+		svcCode, err := packetDecoder.rd.DecodeFreqByte(
+			packetDecoder.ft,
+			freq.SVCType,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -75,181 +91,200 @@ func Decode(
 		case 0x01, 0x02, 0x1b, 0x1c, 0x21, 0x22, 0x23:
 
 		case 0x03:
-			out, err = decoder.appendFreqBytes(out, freq.SVCUpdateStatIndex, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.SVCUpdateStatIndex, 1)
 			if err != nil {
 				return nil, err
 			}
-			out, err = decoder.appendFreqBytes(out, freq.SVCStatValue, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.SVCStatValue, 1)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x06:
-			out, err = decoder.decodeSVCSound(out)
+			out, err = packetDecoder.decodeSVCSound(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x08:
-			out, err = decoder.decodeSVCPrint(out)
+			out, err = packetDecoder.decodeSVCPrint(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x09:
-			out, err = decoder.decodeSVCStufftext(out)
+			out, err = packetDecoder.decodeSVCStufftext(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x0e:
-			out, err = decoder.appendFreqBytes(out, freq.PlayerInfoSlot1, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.PlayerInfoSlot1, 1)
 			if err != nil {
 				return nil, err
 			}
-			out, err = decoder.appendFreqBytes(out, freq.SVCFragsPlayerSlot, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.SVCFragsPlayerSlot, 1)
 			if err != nil {
 				return nil, err
 			}
-			out, err = decoder.appendFreqBytes(out, freq.SVCFragsValue, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.SVCFragsValue, 1)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x13:
-			out, err = decoder.decodeSVCDamage(out)
+			out, err = packetDecoder.decodeSVCDamage(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x1a:
-			out, err = decoder.decodeSVCCenterPrint(out)
+			out, err = packetDecoder.decodeSVCCenterPrint(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x1d, 0x1e:
-			out, err = decoder.appendFreqBytes(out, freq.ByteValue, 9)
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 9)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x17:
-			out, err = decoder.decodeSVCTempEntity(out)
+			out, err = packetDecoder.decodeSVCTempEntity(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x31, 0x32:
-			out, err = decoder.appendFreqBytes(out, freq.ByteValue, 4)
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 4)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x0a:
-			out, err = decoder.appendFreqBytes(out, freq.ByteValue, 3)
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 3)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x10:
-			out, err = decoder.appendFreqBytes(out, freq.ByteValue, 2)
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 2)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x18, 0x20:
-			out, err = decoder.appendFreqBytes(out, freq.ByteValue, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 1)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x27:
-			lo, err := decoder.rd.DecodeFreqByte(decoder.ft, freq.SVCTEntBeamEntityLo)
+			lo, err := packetDecoder.rd.DecodeFreqByte(
+				packetDecoder.ft,
+				freq.SVCTEntBeamEntityLo,
+			)
 			if err != nil {
 				return nil, err
 			}
-			hi, err := decoder.rd.DecodeFreqByte(decoder.ft, freq.SVCTEntBeamEntityHi)
+			hi, err := packetDecoder.rd.DecodeFreqByte(
+				packetDecoder.ft,
+				freq.SVCTEntBeamEntityHi,
+			)
 			if err != nil {
 				return nil, err
 			}
-			id := uint16(decoder.lastEntityAndX>>16) ^ uint16(lo) ^ (uint16(hi) << 8)
-			decoder.lastEntityAndX =
-				(decoder.lastEntityAndX & 0x0000ffff) | (uint32(id) << 16)
+			id := uint16(packetDecoder.lastEntityAndX>>16) ^ uint16(lo) ^
+				(uint16(hi) << 8)
+			packetDecoder.lastEntityAndX =
+				(packetDecoder.lastEntityAndX & 0x0000ffff) | (uint32(id) << 16)
 			out = appendUint16LE(out, id)
 
 		case 0x28:
-			out, err = decoder.appendFreqBytes(out, freq.PlayerInfoSlot1, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.PlayerInfoSlot1, 1)
 			if err != nil {
 				return nil, err
 			}
-			out, err = decoder.appendFreqBytes(out, freq.SVCUpdateUserInfoUserID, 4)
+			out, err = packetDecoder.appendFreqBytes(out, freq.SVCUpdateUserInfoUserID, 4)
 			if err != nil {
 				return nil, err
 			}
-			out, err = decoder.decodeString(out, freq.SVCUpdateUserInfoString)
+			out, err = packetDecoder.decodeString(out, freq.SVCUpdateUserInfoString)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x0c:
-			out, err = decoder.appendFreqBytes(out, freq.ByteValue, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 1)
 			if err != nil {
 				return nil, err
 			}
-			out, err = decoder.decodeString(out, freq.ByteValue)
+			out, err = packetDecoder.decodeString(out, freq.ByteValue)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x2c:
-			out, err = decoder.appendFreqBytes(out, freq.SVCChokeCount, 1)
+			out, err = packetDecoder.appendFreqBytes(out, freq.SVCChokeCount, 1)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x34:
-			out, err = decoder.decodeString(out, freq.SVCServerInfoString)
+			out, err = packetDecoder.decodeString(out, freq.SVCServerInfoString)
 			if err != nil {
 				return nil, err
 			}
-			out, err = decoder.decodeString(out, freq.SVCServerInfoString)
+			out, err = packetDecoder.decodeString(out, freq.SVCServerInfoString)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x33:
-			out, err = decoder.decodeSVCSetInfo(out)
+			out, err = packetDecoder.decodeSVCSetInfo(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x2b:
-			out, err = decoder.decodeSVCNails(out)
+			out, err = packetDecoder.decodeSVCNails(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x24:
-			out, err = decoder.decodeSVCUpdatePing(out)
+			out, err = packetDecoder.decodeSVCUpdatePing(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x35:
-			out, err = decoder.decodeSVCUpdatePL(out)
+			out, err = packetDecoder.decodeSVCUpdatePL(out)
+			if err != nil {
+				return nil, err
+			}
+
+		case 0x51:
+			out, err = packetDecoder.decodeString(out, freq.ByteValue)
+			if err != nil {
+				return nil, err
+			}
+
+		case 0x52:
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 0xa2)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x53:
-			out, err = decoder.decodeSVCQizmoVoice(out)
+			out, err = packetDecoder.decodeSVCQizmoVoice(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x25:
-			out, err = decoder.appendFreqBytes(out, freq.ByteValue, 5)
+			out, err = packetDecoder.appendFreqBytes(out, freq.ByteValue, 5)
 			if err != nil {
 				return nil, err
 			}
@@ -262,27 +297,27 @@ func Decode(
 				freq.SVCUpdateStatLongByte2,
 				freq.SVCUpdateStatLongByte3,
 			} {
-				out, err = decoder.appendFreqBytes(out, freqTableAddr, 1)
+				out, err = packetDecoder.appendFreqBytes(out, freqTableAddr, 1)
 				if err != nil {
 					return nil, err
 				}
 			}
 
 		case 0x2a:
-			out, err = decoder.decodeSVCPlayerInfoDeltas(out)
+			out, err = packetDecoder.decodeSVCPlayerInfoDeltas(out)
 			if err != nil {
 				return nil, err
 			}
 
 		case 0x2f:
-			body, err := decoder.decodeSVCPacketEntitiesFull()
+			body, err := packetDecoder.decodeSVCPacketEntitiesFull()
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, body...)
 
 		case 0x30:
-			body, err := decoder.decodeSVCPacketEntitiesFull()
+			body, err := packetDecoder.decodeSVCPacketEntitiesFull()
 			if err != nil {
 				return nil, err
 			}
@@ -294,8 +329,8 @@ func Decode(
 		}
 	}
 
-	st.CommitPacket()
-	*outer = rd
+	d.state.CommitPacket()
+	*d.outer = rd
 	binary.LittleEndian.PutUint32(out[:4], uint32(len(out)-4))
 
 	return out, nil
