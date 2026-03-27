@@ -312,7 +312,8 @@ func (d *Decoder) Decode(packet []byte, seq uint32) error {
 
 		default:
 			if svcCode >= 0x4a {
-				return nil
+				parser.r = newReader(nil)
+				break
 			}
 			pos := int(parser.r.Size()) - parser.r.Len() - 1
 			return fmt.Errorf("unsupported raw svc 0x%02x at pos %d", svcCode, pos)

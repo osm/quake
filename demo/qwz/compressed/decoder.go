@@ -2,12 +2,15 @@ package compressed
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/osm/quake/demo/qwz/freq"
 	"github.com/osm/quake/demo/qwz/rangedec"
 	"github.com/osm/quake/demo/qwz/state"
 )
+
+var errDroppedPacket = errors.New("dropped compressed packet")
 
 type decoder struct {
 	rd    *rangedec.Decoder
@@ -30,6 +33,8 @@ type Decoder struct {
 	outer *rangedec.Decoder
 	ft    *freq.Tables
 	state *state.Packet
+
+	endOfStreamDroppedPacket bool
 }
 
 func New(
@@ -44,7 +49,13 @@ func New(
 	}
 }
 
-func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
+func (d *Decoder) Decode(
+	seq uint32,
+	ack uint32,
+	emitDroppedOnPrimaryOnlySeqJump bool,
+) ([]byte, error) {
+	d.endOfStreamDroppedPacket = false
+	entry := *d.outer
 	rd := *d.outer
 	packetDecoder := &decoder{
 		rd:                  &rd,
@@ -67,10 +78,14 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 	out = append(out, 0x2a)
 	body, err := packetDecoder.decodeSVCPlayerInfo()
 	if err != nil {
+		if errors.Is(err, errDroppedPacket) {
+			return d.droppedPacket(rd), nil
+		}
 		return nil, err
 	}
 	out = append(out, body...)
 	packetDecoder.refreshPacketContext()
+	hasTrailingSVC := false
 
 	for {
 		svcCode, err := packetDecoder.rd.DecodeFreqByte(
@@ -85,6 +100,7 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 			break
 		}
 
+		hasTrailingSVC = true
 		out = append(out, svcCode)
 
 		switch svcCode {
@@ -109,12 +125,18 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		case 0x08:
 			out, err = packetDecoder.decodeSVCPrint(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
 		case 0x09:
 			out, err = packetDecoder.decodeSVCStufftext(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
@@ -135,6 +157,9 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		case 0x13:
 			out, err = packetDecoder.decodeSVCDamage(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
@@ -153,6 +178,9 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		case 0x17:
 			out, err = packetDecoder.decodeSVCTempEntity(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
@@ -244,24 +272,36 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		case 0x33:
 			out, err = packetDecoder.decodeSVCSetInfo(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
 		case 0x2b:
 			out, err = packetDecoder.decodeSVCNails(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
 		case 0x24:
 			out, err = packetDecoder.decodeSVCUpdatePing(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
 		case 0x35:
 			out, err = packetDecoder.decodeSVCUpdatePL(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
@@ -280,6 +320,9 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		case 0x53:
 			out, err = packetDecoder.decodeSVCQizmoVoice(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
@@ -306,12 +349,18 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		case 0x2a:
 			out, err = packetDecoder.decodeSVCPlayerInfoDeltas(out)
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 
 		case 0x2f:
 			body, err := packetDecoder.decodeSVCPacketEntitiesFull()
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 			out = append(out, body...)
@@ -319,6 +368,9 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		case 0x30:
 			body, err := packetDecoder.decodeSVCPacketEntitiesFull()
 			if err != nil {
+				if errors.Is(err, errDroppedPacket) {
+					return d.droppedPacket(rd), nil
+				}
 				return nil, err
 			}
 			out[len(out)-1] = 0x2f
@@ -329,11 +381,26 @@ func (d *Decoder) Decode(seq, ack uint32) ([]byte, error) {
 		}
 	}
 
+	if emitDroppedOnPrimaryOnlySeqJump && !hasTrailingSVC {
+		d.endOfStreamDroppedPacket = true
+		d.state.CommitPacket()
+		return d.droppedPacket(entry), nil
+	}
+
 	d.state.CommitPacket()
 	*d.outer = rd
 	binary.LittleEndian.PutUint32(out[:4], uint32(len(out)-4))
 
 	return out, nil
+}
+
+func (d *Decoder) droppedPacket(rd rangedec.Decoder) []byte {
+	*d.outer = rd
+	return []byte{0, 0, 0, 0}
+}
+
+func (d *Decoder) EndOfStreamDroppedPacket() bool {
+	return d.endOfStreamDroppedPacket
 }
 
 func (d *decoder) refreshPacketContext() {

@@ -472,6 +472,32 @@ func (d *decoder) decodePlayerSlotDelta(lastPlayerIndex *byte) (byte, error) {
 	return *lastPlayerIndex, nil
 }
 
+func (d *decoder) loadPlayerInfoBase(
+	refSeq uint32,
+) (state.PlayerRecord, []state.PlayerRecord, error) {
+	st := d.state
+
+	if _, ok := st.FindEntHistoryBySeq(refSeq); !ok {
+		return state.PlayerRecord{}, nil, errDroppedPacket
+	}
+
+	baseRec, foundBase, err := st.FindBaseline(refSeq)
+	if err != nil {
+		return state.PlayerRecord{}, nil, errDroppedPacket
+	}
+
+	playerHistory, ok := st.PlayerHistoryEntry(refSeq)
+	if !ok {
+		return state.PlayerRecord{}, nil, errDroppedPacket
+	}
+
+	if !foundBase {
+		return st.DefaultRec(), playerHistory.Recs, nil
+	}
+
+	return baseRec, playerHistory.Recs, nil
+}
+
 func (d *decoder) decodeSVCPlayerInfo() ([]byte, error) {
 	rd := d.rd
 	ft := d.ft
@@ -486,7 +512,6 @@ func (d *decoder) decodeSVCPlayerInfo() ([]byte, error) {
 	}
 	refSeq := st.SeqNo() - uint32(back)
 	scale := int(st.Scale(refSeq)) * int(back)
-
 	var rec state.PlayerRecord
 	if back == 0 {
 		rec = st.DefaultRec()
@@ -494,15 +519,12 @@ func (d *decoder) decodeSVCPlayerInfo() ([]byte, error) {
 	} else {
 		st.PacketBaseSeq = refSeq
 		st.PacketHasBase = true
-		base, ok, err := st.FindBaseline(refSeq)
+		baseRec, basePlayers, err := d.loadPlayerInfoBase(refSeq)
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			rec = base
-		} else {
-			rec = st.DefaultRec()
-		}
+		rec = baseRec
+		d.basePlayers = basePlayers
 	}
 
 	b, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoOriginMaskXor)
@@ -801,7 +823,11 @@ func (d *decoder) decodeSVCPlayerInfoDeltas(out []byte) ([]byte, error) {
 		player := *lastPlayerIndex + delta
 		*lastPlayerIndex = player
 		if player > 0x1f {
-			return nil, fmt.Errorf("invalid svc_playerinfo player %d", player)
+			return nil, fmt.Errorf(
+				"%w: invalid svc_playerinfo player %d",
+				errDroppedPacket,
+				player,
+			)
 		}
 
 		baseRec := basePlayerInfoRecord(

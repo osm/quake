@@ -4,9 +4,6 @@ func EmbeddedStringTable(src []string) map[uint16][]byte {
 	dst := make(map[uint16][]byte, len(src))
 
 	for i, s := range src {
-		if s == "" {
-			continue
-		}
 		dst[uint16(i)] = []byte(s)
 	}
 

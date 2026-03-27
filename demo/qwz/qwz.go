@@ -100,21 +100,37 @@ func Decode(qwzData []byte, ft *freq.Tables, assets assets.Assets) ([]byte, erro
 		switch qizmoCmd {
 		case qwzDemoCmd:
 			if err := d.decodeDemoCmd(); err != nil {
-				return nil, err
+				return nil, fmt.Errorf(
+					"record %d demo_cmd: %w",
+					d.record,
+					err,
+				)
 			}
 		case qwzDemoRead:
 			if err := d.decodeDemoRead(); err != nil {
-				return nil, err
+				if err == io.EOF {
+					return d.out.Bytes(), nil
+				}
+				return nil, fmt.Errorf(
+					"record %d demo_read: %w",
+					d.record,
+					err,
+				)
 			}
 		case qwzDemoSet:
 			if err := d.decodeDemoSet(); err != nil {
-				return nil, err
+				return nil, fmt.Errorf(
+					"record %d demo_set: %w",
+					d.record,
+					err,
+				)
 			}
 		default:
 			return nil, fmt.Errorf("unknown demo command %d at record %d", qizmoCmd, d.record)
 		}
 
 		d.record++
+
 	}
 
 	return d.out.Bytes(), nil
@@ -182,10 +198,14 @@ func (d *decoder) decodeStandardSVC() error {
 	}
 
 	if len(payload) >= 8 {
-		d.seq = uint32(binary.LittleEndian.Uint32(payload[0:4]))
-		d.ack = uint32(binary.LittleEndian.Uint32(payload[4:8]))
-		if err := d.std.Decode(payload, d.seq); err != nil {
-			return fmt.Errorf("decode raw svc seq=%d: %w", d.seq, err)
+		seq := uint32(binary.LittleEndian.Uint32(payload[0:4]))
+		ack := uint32(binary.LittleEndian.Uint32(payload[4:8]))
+		if seq != 0xffffffff {
+			d.seq = seq
+			d.ack = ack
+		}
+		if err := d.std.Decode(payload, seq); err != nil {
+			return fmt.Errorf("decode raw svc seq=%d: %w", seq, err)
 		}
 	}
 	return nil
@@ -195,13 +215,17 @@ func (d *decoder) decodeCompressedSVC(mode uint32) error {
 	d.seq = (d.seq + uint32(mode)) & 0x7fffffff
 	d.ack = d.seq
 
-	payload, err := d.comp.Decode(d.seq, d.ack)
+	payload, err := d.comp.Decode(d.seq, d.ack, mode > 1)
 	if err != nil {
 		return err
 	}
 
 	if _, err := d.out.Write(payload); err != nil {
 		return err
+	}
+
+	if d.comp.EndOfStreamDroppedPacket() {
+		return io.EOF
 	}
 
 	return nil

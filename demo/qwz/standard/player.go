@@ -53,6 +53,11 @@ func (d *decoder) parsePlayerInfo(seq uint32) error {
 			state.SetU16LE(&recB, 14, v)
 			rec = state.PlayerRecordFromBytesLE(recB)
 		}
+		if extra&0x02 != 0 {
+			if _, err := d.r.ReadU16(); err != nil {
+				return err
+			}
+		}
 		if extra&0x80 != 0 {
 			v, err := d.r.ReadU16()
 			if err != nil {
@@ -152,7 +157,6 @@ func (d *decoder) parsePlayerInfo(seq uint32) error {
 		}
 		state.SetPlayerRecordByte(&rec, 0x22, v)
 	}
-
 	d.st.CurrentPlayers = append(d.st.CurrentPlayers, rec)
 	return nil
 }

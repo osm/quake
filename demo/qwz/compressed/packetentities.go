@@ -432,7 +432,9 @@ func (d *decoder) decodeSVCPacketEntitiesFull() ([]byte, error) {
 		for run > 1 {
 			if baseIndex >= len(baseEntities) {
 				return nil, fmt.Errorf(
-					"seq=%d 0x30 copy overflow run=%d base=%d/%d seq=%d",
+					"%w: "+
+						"seq=%d 0x30 copy overflow run=%d base=%d/%d seq=%d",
+					errDroppedPacket,
 					st.SeqNo(),
 					run,
 					baseIndex,
@@ -446,7 +448,9 @@ func (d *decoder) decodeSVCPacketEntitiesFull() ([]byte, error) {
 		}
 		if baseIndex >= len(baseEntities) {
 			return nil, fmt.Errorf(
-				"seq=%d 0x30 missing base sym=0x%02x base=%d/%d seq=%d",
+				"%w: "+
+					"seq=%d 0x30 missing base sym=0x%02x base=%d/%d seq=%d",
+				errDroppedPacket,
 				st.SeqNo(),
 				sym,
 				baseIndex,
