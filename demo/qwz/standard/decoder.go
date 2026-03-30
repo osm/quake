@@ -1,12 +1,22 @@
 package standard
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"strings"
 
+	"github.com/osm/quake/common/context"
 	"github.com/osm/quake/demo/qwz/state"
+	"github.com/osm/quake/packet/command"
+	"github.com/osm/quake/packet/command/deltapacketentities"
+	"github.com/osm/quake/packet/command/modellist"
+	"github.com/osm/quake/packet/command/packetentities"
+	"github.com/osm/quake/packet/command/playerinfo"
+	"github.com/osm/quake/packet/command/qizmovoice"
+	"github.com/osm/quake/packet/command/serverdata"
+	"github.com/osm/quake/packet/command/soundlist"
+	"github.com/osm/quake/packet/command/spawnbaseline"
+	"github.com/osm/quake/packet/command/stufftext"
+	"github.com/osm/quake/packet/svc"
 )
 
 type decoder struct {
@@ -15,7 +25,6 @@ type decoder struct {
 
 	handlers map[Event][]HandlerFunc
 
-	packet     []byte
 	packetEnts map[uint16]state.EntityRecord
 }
 
@@ -30,18 +39,17 @@ type HandlerFunc func(payload []byte)
 type Decoder struct {
 	state    *state.Packet
 	handlers map[Event][]HandlerFunc
+	ctx      *context.Context
 }
 
-// New returns a normal QuakeWorld svc parser. It does not use the parsed data
-// directly, but parsing is required to keep the decoder state in sync.
-//
-// This parser is likely still incomplete. If QWZ decoding fails on a sample,
-// one of the first things to check is whether this parser is handling the raw
-// svc stream correctly enough to keep the shared state aligned.
+// New returns a QuakeWorld svc parser backed by the shared packet/svc command
+// parser. The standard package remains responsible for applying the QWZ-specific
+// packet state derived from those parsed commands.
 func New(st *state.Packet) *Decoder {
 	return &Decoder{
 		state:    st,
 		handlers: make(map[Event][]HandlerFunc),
+		ctx:      context.New(),
 	}
 }
 
@@ -58,291 +66,166 @@ func (d *Decoder) Decode(packet []byte, seq uint32) error {
 		return nil
 	}
 
+	pkg, err := svc.ParseGameDataWithOptions(
+		d.ctx,
+		packet,
+		svc.Options{
+			QWZCompatibility: true,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
 	parser := &decoder{
-		r:        newReader(packet[8:]),
 		st:       d.state,
 		handlers: d.handlers,
-		packet:   packet,
 	}
 
 	parser.st.BeginPacket(seq)
 
-	for parser.r.Len() > 0 {
-		posBeforeOp := int(parser.r.Size()) - parser.r.Len()
+	for i, parsedCmd := range pkg.Commands {
+		opcode := pkg.RawCmds[i][0]
+		if opcode == 0x3e {
+			return nil
+		}
+		if opcode >= 0x4a && opcode != 0x51 && opcode != 0x52 && opcode != 0x53 {
+			break
+		}
+		if err := parser.applyCommand(parsedCmd, pkg.RawCmds[i], seq); err != nil {
+			return err
+		}
+	}
 
-		svcCode, err := parser.r.ReadByte()
+	parser.finalizePacket(seq)
+	return nil
+}
+
+func (d *decoder) applyCommand(cmdAny command.Command, raw []byte, seq uint32) error {
+	switch cmd := cmdAny.(type) {
+	case *serverdata.Command:
+		d.st.PlayerIndex = cmd.PlayerNumber & 0x7f
+	case *stufftext.Command:
+		if !d.st.TablesBuilt &&
+			(strings.HasPrefix(cmd.String, "cmd prespawn") ||
+				strings.HasPrefix(cmd.String, "cmd spawn")) {
+			d.st.RebuildRemaps()
+		}
+	case *spawnbaseline.Command:
+		return d.applySpawnBaseline(raw)
+	case *playerinfo.Command:
+		return d.applyPlayerInfo(raw, seq)
+	case *packetentities.Command:
+		return d.applyPacketEntities(raw)
+	case *deltapacketentities.Command:
+		return d.applyDeltaPacketEntities(raw, cmd.Index)
+	case *modellist.Command:
+		if err := d.applyModelList(raw); err != nil {
+			return err
+		}
+		d.st.AddModelChunk(raw)
+	case *soundlist.Command:
+		if err := d.applySoundList(raw); err != nil {
+			return err
+		}
+		d.st.AddSoundChunk(raw)
+	case *qizmovoice.Command:
+		for _, handler := range d.handlers[QizmoVoice] {
+			handler(append([]byte(nil), cmd.Data...))
+		}
+	}
+
+	return nil
+}
+
+func (d *decoder) applySpawnBaseline(raw []byte) error {
+	d.r = newReader(raw[1:])
+	return d.parseSpawnBaseline()
+}
+
+func (d *decoder) applyPlayerInfo(raw []byte, seq uint32) error {
+	d.r = newReader(raw[1:])
+	return d.parsePlayerInfo(seq)
+}
+
+func (d *decoder) applyPacketEntities(raw []byte) error {
+	d.r = newReader(raw[1:])
+	return d.parsePacketEntities(nil)
+}
+
+func (d *decoder) applyDeltaPacketEntities(raw []byte, ref byte) error {
+	base, _ := d.st.FindRawEntitiesByte(ref)
+	d.r = newReader(raw[2:])
+	return d.parsePacketEntities(base)
+}
+
+func (d *decoder) applyModelList(raw []byte) error {
+	r := newReader(raw[1:])
+	start, err := r.ReadByte()
+	if err != nil {
+		return err
+	}
+	if start == 0 {
+		d.st.ResetEntityTracking()
+	}
+
+	modelIdx := int(start)
+	for {
+		s, err := r.ReadString()
 		if err != nil {
 			return err
 		}
-
-		if svcCode == 0 {
-			break
-		}
-
-		switch svcCode {
-		case 0x01, 0x02, 0x1b, 0x1c, 0x21, 0x22, 0x23:
-
-		case 0x03:
-			_, err = parser.r.ReadN(2)
-		case 0x04:
-			_, err = parser.r.ReadN(2)
-		case 0x05, 0x07, 0x18, 0x20:
-			_, err = parser.r.ReadN(1)
-
-		case 0x06:
-			w, e := parser.r.ReadU16()
-			if e != nil {
-				err = e
-				break
-			}
-			if int16(w) < 0 {
-				_, err = parser.r.ReadN(1)
-				if err != nil {
-					break
-				}
-			}
-			if w&0x4000 != 0 {
-				_, err = parser.r.ReadN(1)
-				if err != nil {
-					break
-				}
-			}
-			_, err = parser.r.ReadN(7)
-
-		case 0x08:
-			_, err = parser.r.ReadByte()
-			if err == nil {
-				_, err = parser.r.ReadString()
-			}
-
-		case 0x09:
-			var s []byte
-			s, err = parser.r.ReadString()
-			if err == nil {
-				text := string(bytes.TrimSuffix(s, []byte{0}))
-				if !parser.st.TablesBuilt &&
-					(strings.HasPrefix(text, "cmd prespawn") ||
-						strings.HasPrefix(text, "cmd spawn")) {
-					parser.st.RebuildRemaps()
-				}
-			}
-		case 0x1a, 0x1f, 0x51:
-			_, err = parser.r.ReadString()
-
-		case 0x0b:
-			b, e := parser.r.ReadN(8)
-			if e != nil {
-				err = e
-				break
-			}
-			_, err = parser.r.ReadString()
-			if err != nil {
-				break
-			}
-			playerNum, e := parser.r.ReadByte()
-			if e != nil {
-				err = e
-				break
-			}
-			parser.st.PlayerIndex = playerNum & 0x7f
-			_, err = parser.r.ReadString()
-			if err != nil {
-				break
-			}
-			if binary.LittleEndian.Uint32(b[0:4]) > 0x18 {
-				_, err = parser.r.ReadN(40)
-			}
-
-		case 0x0c:
-			_, err = parser.r.ReadByte()
-			if err == nil {
-				_, err = parser.r.ReadString()
-			}
-		case 0x0e, 0x24:
-			_, err = parser.r.ReadN(3)
-		case 0x10:
-			_, err = parser.r.ReadN(1)
-		case 0x11:
-			_, err = parser.r.ReadN(6)
-		case 0x13:
-			_, err = parser.r.ReadN(8)
-		case 0x0a:
-			_, err = parser.r.ReadN(3)
-		case 0x14:
-			_, err = parser.r.ReadN(13)
-
-		case 0x16:
-			err = parser.parseSpawnBaseline()
-
-		case 0x17:
-			t, e := parser.r.ReadByte()
-			if e != nil {
-				err = e
-				break
-			}
-			switch t {
-			case 0x02, 0x0c:
-				_, err = parser.r.ReadN(7)
-			case 0x05, 0x06, 0x09:
-				_, err = parser.r.ReadN(14)
-			default:
-				_, err = parser.r.ReadN(6)
-			}
-		case 0x1d, 0x1e:
-			_, err = parser.r.ReadN(9)
-		case 0x25, 0x26:
-			_, err = parser.r.ReadN(5)
-
-		case 0x27:
-			_, err = parser.r.ReadN(2)
-
-		case 0x28:
-			_, err = parser.r.ReadN(5)
-			if err == nil {
-				_, err = parser.r.ReadString()
-			}
-		case 0x29:
-			h, e := parser.r.ReadN(3)
-			if e != nil {
-				err = e
-				break
-			}
-			n := binary.LittleEndian.Uint16(h[0:2])
-			if n != 0xffff {
-				_, err = parser.r.ReadN(int(n))
-			}
-		case 0x3e:
+		if len(s) == 1 {
 			return nil
-
-		case 0x2a:
-			err = parser.parsePlayerInfo(seq)
-		case 0x2b:
-			n, e := parser.r.ReadByte()
-			if e != nil {
-				err = e
-				break
-			}
-			_, err = parser.r.ReadN(int(n) * 6)
-		case 0x2c:
-			_, err = parser.r.ReadN(1)
-		case 0x2d, 0x2e:
-			start, e := parser.r.ReadByte()
-			if e != nil {
-				err = e
-				break
-			}
-			if svcCode == 0x2d && start == 0 {
-				parser.st.ResetEntityTracking()
-			}
-			modelIdx := int(start)
-			for {
-				s, e := parser.r.ReadString()
-				if e != nil {
-					err = e
-					break
-				}
-				if len(s) == 1 {
-					break
-				}
-				modelIdx++
-				name := string(s[:len(s)-1])
-				if svcCode == 0x2d {
-					parser.st.ModelNames[modelIdx] = name
-				} else {
-					parser.st.SoundNames[modelIdx] = name
-				}
-				if svcCode == 0x2d && string(s[:len(s)-1]) == "progs/player.mdl" {
-					parser.st.PlayerFreqIndex = byte(modelIdx)
-				}
-			}
-			if err != nil {
-				break
-			}
-			_, err = parser.r.ReadByte()
-			if err == nil {
-				posAfter := int(parser.r.Size()) - parser.r.Len()
-				chunk := append([]byte(nil), parser.packet[8+posBeforeOp:8+posAfter]...)
-				if svcCode == 0x2d {
-					parser.st.AddModelChunk(chunk)
-				} else {
-					parser.st.AddSoundChunk(chunk)
-				}
-			}
-		case 0x2f:
-			err = parser.parsePacketEntities(nil)
-
-		case 0x30:
-			ref, e := parser.r.ReadByte()
-			if e != nil {
-				err = e
-				break
-			}
-			base, _ := parser.st.FindRawEntitiesByte(ref)
-			err = parser.parsePacketEntities(base)
-		case 0x31, 0x32:
-			_, err = parser.r.ReadN(4)
-
-		case 0x33:
-			_, err = parser.r.ReadByte()
-			if err == nil {
-				_, err = parser.r.ReadString()
-			}
-			if err == nil {
-				_, err = parser.r.ReadString()
-			}
-
-		case 0x34:
-			_, err = parser.r.ReadString()
-			if err == nil {
-				_, err = parser.r.ReadString()
-			}
-		case 0x35:
-			_, err = parser.r.ReadN(2)
-
-		case 0x52:
-			_, err = parser.r.ReadN(0xa2)
-
-		case 0x53:
-			payload, e := parser.r.ReadN(0x22)
-			if e != nil {
-				err = e
-				break
-			}
-
-			for _, handler := range parser.handlers[QizmoVoice] {
-				handler(append([]byte(nil), payload...))
-			}
-
-		default:
-			if svcCode >= 0x4a {
-				parser.r = newReader(nil)
-				break
-			}
-			pos := int(parser.r.Size()) - parser.r.Len() - 1
-			return fmt.Errorf("unsupported raw svc 0x%02x at pos %d", svcCode, pos)
 		}
 
+		modelIdx++
+		name := string(s[:len(s)-1])
+		d.st.ModelNames[modelIdx] = name
+		if name == "progs/player.mdl" {
+			d.st.PlayerFreqIndex = byte(modelIdx)
+		}
+	}
+}
+
+func (d *decoder) applySoundList(raw []byte) error {
+	r := newReader(raw[1:])
+	start, err := r.ReadByte()
+	if err != nil {
+		return err
+	}
+
+	soundIdx := int(start)
+	for {
+		s, err := r.ReadString()
 		if err != nil {
-			return fmt.Errorf("decode raw svc 0x%02x: %w", svcCode, err)
+			return err
 		}
-	}
+		if len(s) == 1 {
+			return nil
+		}
 
+		soundIdx++
+		d.st.SoundNames[soundIdx] = string(s[:len(s)-1])
+	}
+}
+
+func (d *decoder) finalizePacket(seq uint32) {
 	histSeq := seq
-	if len(parser.st.CurrentPlayers) != 0 && parser.st.CmdSeqNo != 0 {
-		histSeq = parser.st.CmdSeqNo + 1
+	if len(d.st.CurrentPlayers) != 0 && d.st.CmdSeqNo != 0 {
+		histSeq = d.st.CmdSeqNo + 1
 	}
 
-	if parser.packetEnts != nil {
-		for entNum, rec := range parser.packetEnts {
-			parser.st.EntityLast[entNum] = rec
-			parser.st.EntityRaw[entNum] = rec
-			parser.st.EntityLastRaw[entNum] = true
+	if d.packetEnts != nil {
+		for entNum, rec := range d.packetEnts {
+			d.st.EntityLast[entNum] = rec
+			d.st.EntityRaw[entNum] = rec
+			d.st.EntityLastRaw[entNum] = true
 		}
 
-		parser.st.CommitRawEntitiesByte(byte(seq), parser.packetEnts)
-		parser.st.CommitEntities(histSeq, parser.packetEnts)
+		d.st.CommitRawEntitiesByte(byte(seq), d.packetEnts)
+		d.st.CommitEntities(histSeq, d.packetEnts)
 	}
 
-	parser.st.CommitPacketAs(histSeq)
-	return nil
+	d.st.CommitPacketAs(histSeq)
 }

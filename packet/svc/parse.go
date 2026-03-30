@@ -6,6 +6,10 @@ import (
 	"github.com/osm/quake/packet"
 )
 
+type Options struct {
+	QWZCompatibility bool
+}
+
 func Parse(ctx *context.Context, data []byte) (packet.Packet, error) {
 	buf := buffer.New(buffer.WithData(data))
 
@@ -15,4 +19,13 @@ func Parse(ctx *context.Context, data []byte) (packet.Packet, error) {
 	}
 
 	return parseGameData(ctx, buf)
+}
+
+func ParseGameDataWithOptions(
+	ctx *context.Context,
+	data []byte,
+	opts Options,
+) (*GameData, error) {
+	buf := buffer.New(buffer.WithData(data))
+	return parseGameDataWithOptions(ctx, buf, opts)
 }

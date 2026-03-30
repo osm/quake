@@ -79,6 +79,7 @@ type GameData struct {
 	Seq      uint32
 	Ack      uint32
 	Commands []command.Command
+	RawCmds  [][]byte
 }
 
 func (gd *GameData) Bytes() []byte {
@@ -100,6 +101,14 @@ process:
 }
 
 func parseGameData(ctx *context.Context, buf *buffer.Buffer) (*GameData, error) {
+	return parseGameDataWithOptions(ctx, buf, Options{})
+}
+
+func parseGameDataWithOptions(
+	ctx *context.Context,
+	buf *buffer.Buffer,
+	opts Options,
+) (*GameData, error) {
 	var err error
 	var pkg GameData
 
@@ -121,9 +130,15 @@ func parseGameData(ctx *context.Context, buf *buffer.Buffer) (*GameData, error) 
 process:
 	var cmd command.Command
 	for buf.Off() < buf.Len() {
+		posBeforeCmd := buf.Off()
+
 		typ, err := buf.ReadByte()
 		if err != nil {
 			return nil, err
+		}
+
+		if opts.QWZCompatibility && typ == 0 {
+			break
 		}
 
 		if pkg.IsNQ && typ&128 != 0 {
@@ -251,6 +266,9 @@ process:
 		case fte.SVCVoiceChat:
 			cmd, err = ftevoicechats.Parse(ctx, buf)
 		default:
+			if opts.QWZCompatibility && typ >= 0x4a {
+				return &pkg, nil
+			}
 			return nil, ErrUnknownCommandType
 		}
 
@@ -259,6 +277,10 @@ process:
 			return nil, err
 		}
 		pkg.Commands = append(pkg.Commands, cmd)
+		pkg.RawCmds = append(
+			pkg.RawCmds,
+			append([]byte(nil), buf.Bytes()[posBeforeCmd:buf.Off()]...),
+		)
 	}
 
 	return &pkg, nil
