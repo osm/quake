@@ -26,6 +26,7 @@ type decoder struct {
 	primaryPlayerPosXY uint32
 	primaryPlayerPosZ  uint32
 	basePlayers        []state.PlayerRecord
+	baseEntities       []state.EntityRecord
 	packetScale        int
 }
 
@@ -420,11 +421,17 @@ func (d *decoder) refreshPacketContext() {
 		} else {
 			d.basePlayers = nil
 		}
+		if ents, ok := d.state.FindEntHistoryBySeq(d.state.PacketBaseSeq); ok {
+			d.baseEntities = ents
+		} else {
+			d.baseEntities = nil
+		}
 		d.packetScale =
 			int(d.state.Scale(d.state.PacketBaseSeq)) *
 				int(d.state.SeqNo()-d.state.PacketBaseSeq)
 	} else {
 		d.basePlayers = nil
+		d.baseEntities = nil
 		d.packetScale = 0
 	}
 }

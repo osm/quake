@@ -1,9 +1,6 @@
 package compressed
 
-import (
-	"github.com/osm/quake/demo/qwz/freq"
-	"github.com/osm/quake/demo/qwz/state"
-)
+import "github.com/osm/quake/demo/qwz/freq"
 
 func (d *decoder) decodeSVCTempEntity(out []byte) ([]byte, error) {
 	rd := d.rd
@@ -48,7 +45,6 @@ func (d *decoder) decodeSVCTempEntity(out []byte) ([]byte, error) {
 		}
 		ent := uint16(*lastEntityAndX >> 16)
 		out = appendUint16LE(out, ent)
-
 		if int8(flags) >= 0 && ent != 0 {
 			if ent < 0x21 {
 				if len(basePlayers) != 0 {
@@ -57,15 +53,12 @@ func (d *decoder) decodeSVCTempEntity(out []byte) ([]byte, error) {
 					}
 				}
 			} else {
-				x, y, z, found, stoppedBefore := resolveEntityCoords(st, ent)
+				x, y, z, found, _ := resolveEntityCoordsFromSlice(
+					d.baseEntities,
+					ent,
+				)
 				if found {
 					impactX, impactY, impactZ = x, y, z
-				} else if stoppedBefore {
-					if rec, ok := st.Baselines[ent]; ok {
-						impactX = state.EntityRecordU16(rec, 12)
-						impactY = state.EntityRecordU16(rec, 14)
-						impactZ = state.EntityRecordU16(rec, 16)
-					}
 				}
 			}
 		}

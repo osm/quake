@@ -30,8 +30,11 @@ func (d *decoder) parsePacketEntities(base map[uint16]state.EntityRecord) error 
 
 		rec, ok := ents[entNum]
 		if !ok {
-			rec = d.st.Baselines[entNum]
+			rec, _ = d.st.Baselines[entNum]
 			state.SetEntityNumber(&rec, entNum)
+		}
+		for i := 18; i <= 26; i++ {
+			rec[i] = 0
 		}
 
 		if bits&0x0004 != 0 {
@@ -112,6 +115,8 @@ func (d *decoder) parsePacketEntities(base map[uint16]state.EntityRecord) error 
 			state.SetEntityRecordByte(&rec, 11, v)
 		}
 
+		rec[2] = byte(bits)
+		rec[3] = byte(bits>>8) & 0x3f
 		ents[entNum] = rec
 	}
 }

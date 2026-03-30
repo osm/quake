@@ -379,6 +379,7 @@ func (d *decoder) decodeSVCPacketEntitiesFull() ([]byte, error) {
 
 			rec := entityBaseline(st, currentEntityNum)
 			state.SetEntityNumber(&rec, currentEntityNum)
+			// New entities start with fresh hidden delta carry state.
 			for i := 18; i <= 26; i++ {
 				rec[i] = 0
 			}
@@ -500,6 +501,7 @@ func (d *decoder) decodeSVCPacketEntitiesFull() ([]byte, error) {
 		state.AddEntityRecordI16(&rec, 12, int16(state.EntityRecordU16(rec, 18)))
 		state.AddEntityRecordI16(&rec, 14, int16(state.EntityRecordU16(rec, 20)))
 		state.AddEntityRecordI16(&rec, 16, int16(state.EntityRecordU16(rec, 22)))
+		// Keep the effective mask in the internal record for later delta steps.
 		rec[2] = byte(mask)
 		rec[3] = byte(mask>>8) & 0x3f
 		packetEntities = append(packetEntities, rec)

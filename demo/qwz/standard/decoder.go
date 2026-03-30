@@ -231,6 +231,9 @@ func (d *Decoder) Decode(packet []byte, seq uint32) error {
 				err = e
 				break
 			}
+			if svcCode == 0x2d && start == 0 {
+				parser.st.ResetEntityTracking()
+			}
 			modelIdx := int(start)
 			for {
 				s, e := parser.r.ReadString()

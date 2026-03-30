@@ -23,27 +23,34 @@ func resolveEntityCoords(
 	entityID uint16,
 ) (uint16, uint16, uint16, bool, bool) {
 	if ents, ok := st.FindEntHistoryBySeq(st.SeqNo()); ok {
-		found := false
-		stoppedBefore := false
-
-		for _, rec := range ents {
-			ent := state.EntityNumber(rec)
-			if ent == entityID {
-				return state.EntityRecordU16(rec, 12),
-					state.EntityRecordU16(rec, 14),
-					state.EntityRecordU16(rec, 16),
-					true,
-					false
-			}
-
-			if entityID < ent {
-				stoppedBefore = true
-				break
-			}
-		}
-
-		return 0, 0, 0, found, stoppedBefore
+		return resolveEntityCoordsFromSlice(ents, entityID)
 	}
 
 	return 0, 0, 0, false, false
+}
+
+func resolveEntityCoordsFromSlice(
+	ents []state.EntityRecord,
+	entityID uint16,
+) (uint16, uint16, uint16, bool, bool) {
+	found := false
+	stoppedBefore := false
+
+	for _, rec := range ents {
+		ent := state.EntityNumber(rec)
+		if ent == entityID {
+			return state.EntityRecordU16(rec, 12),
+				state.EntityRecordU16(rec, 14),
+				state.EntityRecordU16(rec, 16),
+				true,
+				false
+		}
+
+		if entityID < ent {
+			stoppedBefore = true
+			break
+		}
+	}
+
+	return 0, 0, 0, found, stoppedBefore
 }

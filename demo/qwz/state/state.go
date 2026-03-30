@@ -212,6 +212,25 @@ func (st *Packet) CommitEntities(seq uint32, ents map[uint16]EntityRecord) {
 	slot.Ordered = sortedEntitySlice(slot.Ents)
 }
 
+func (st *Packet) ResetEntityTracking() {
+	clear(st.Baselines)
+	clear(st.EntityLast)
+	clear(st.EntityRaw)
+	clear(st.EntityLastRaw)
+
+	for i := range st.EntityHistory {
+		st.EntityHistory[i] = EntityHistory{}
+	}
+
+	for i := range st.RawEntByteHist {
+		st.RawEntByteHist[i] = nil
+	}
+
+	st.PacketBaseSeq = 0
+	st.PacketHasBase = false
+	st.PacketEntsCommitted = false
+}
+
 func (st *Packet) DefaultRec() PlayerRecord {
 	var r PlayerRecord
 	SetPlayerRecordByte(&r, 0x0b, st.PlayerIndex)
