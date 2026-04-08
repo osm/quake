@@ -18,6 +18,7 @@ func (s *Server) handleClientCommand(client *client, cmd command.Command) []comm
 			&s2cchallenge.Command{ChallengeID: fmt.Sprintf("c-%d", rand.Uint16())},
 		}
 	case *connect.Command:
+		client.resetSession(localServerPing)
 		client.name = c.UserInfo.Get("name")
 		return []command.Command{
 			&s2cconnection.Command{},

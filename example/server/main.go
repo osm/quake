@@ -39,10 +39,10 @@ func main() {
 		}
 	}()
 
-	srv.HandleFunc(func(client server.Client, packet packet.Packet) []command.Command {
+	srv.HandleFunc(func(client server.Client, packet packet.Packet) server.HandlerResult {
 		gameData, ok := packet.(*clc.GameData)
 		if !ok {
-			return []command.Command{}
+			return server.HandlerResult{}
 		}
 
 		var cmds []command.Command
@@ -60,7 +60,7 @@ func main() {
 			}
 		}
 
-		return cmds
+		return server.HandlerResult{Commands: cmds}
 	})
 
 	logger.Printf("listening on %s", *addrPort)

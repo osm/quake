@@ -1,6 +1,7 @@
 package quake
 
 import (
+	"errors"
 	"net"
 	"time"
 
@@ -10,10 +11,11 @@ import (
 	"github.com/osm/quake/packet/command"
 	"github.com/osm/quake/packet/command/s2cchallenge"
 	"github.com/osm/quake/packet/command/s2cconnection"
-	"github.com/osm/quake/packet/command/stufftext"
 	"github.com/osm/quake/packet/svc"
 	"github.com/osm/quake/protocol"
 )
+
+const localServerPing = 0
 
 func (s *Server) ListenAndServe(addrPort string) error {
 	addr, err := net.ResolveUDPAddr("udp", addrPort)
@@ -44,6 +46,9 @@ func (s *Server) ListenAndServe(addrPort string) error {
 	for {
 		n, clientAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			s.logger.Printf("unable to read from socket, %v", err)
 			continue
 		}
@@ -53,14 +58,13 @@ func (s *Server) ListenAndServe(addrPort string) error {
 			s.logger.Printf("unable to parse CLC data, %v\n", err)
 			continue
 		}
-
 		key := clientAddr.String()
 
 		c, ok := s.clients[key]
 		if !ok {
 			c = &client{
 				addr:      clientAddr,
-				seq:       sequencer.New(sequencer.WithOutgoingSeq(1)),
+				seq:       sequencer.New(sequencer.WithOutgoingSeq(1), sequencer.WithPing(localServerPing)),
 				lastWrite: time.Now(),
 			}
 
@@ -70,6 +74,7 @@ func (s *Server) ListenAndServe(addrPort string) error {
 		var clientCmds []command.Command
 		var incomingSeq uint32
 		var incomingAck uint32
+		consume := false
 
 		switch p := packet.(type) {
 		case *clc.Connectionless:
@@ -81,7 +86,13 @@ func (s *Server) ListenAndServe(addrPort string) error {
 		}
 
 		for _, h := range s.handlers {
-			s.Enqueue(h(c, packet))
+			res := h(c, packet)
+			s.Enqueue(res.Commands)
+			consume = consume || res.Consume
+		}
+
+		if consume {
+			continue
 		}
 
 		s.processCommands(c, incomingSeq, incomingAck, clientCmds)
@@ -111,30 +122,43 @@ func (s *Server) processCommands(
 		}
 	}
 
-	if client.seq.GetState() != sequencer.Connected && client.name != "" {
+	if client.seq.GetState() != sequencer.Connected && incomingSeq != 0 {
 		client.seq.SetState(sequencer.Connected)
-
-		cmds = append(cmds, &stufftext.Command{
-			String: "skins",
-		})
 	}
 
+	// Connectionless commands send their own replies directly. In raw live mode
+	// we must not follow them with a synthetic empty sequenced packet, because
+	// that advances the local client's ack state before the upstream server has
+	// sent any real sequenced traffic.
+	if incomingSeq == 0 && incomingAck == 0 && len(cmds) == 0 && len(client.cmds) == 0 {
+		return
+	}
+
+	s.flushClient(client, incomingSeq, incomingAck, cmds)
+}
+
+func (s *Server) flushClient(
+	client *client,
+	incomingSeq, incomingAck uint32,
+	cmds []command.Command,
+) {
 	outSeq, outAck, outCmds, err := client.seq.Process(incomingSeq, incomingAck, cmds)
 	if err == sequencer.ErrRateLimit {
 		return
 	}
 
+	allCmds := append(outCmds, client.cmds...)
+
 	if _, err := s.conn.WriteToUDP(
 		(&svc.GameData{
 			Seq:      outSeq,
 			Ack:      outAck,
-			Commands: append(outCmds, client.cmds...),
+			Commands: allCmds,
 		}).Bytes(),
 		client.addr,
 	); err != nil {
 		s.logger.Printf("unable to write data to socket, %v", err)
 	}
-
 	client.lastWrite = time.Now()
 	client.cmds = []command.Command{}
 }
