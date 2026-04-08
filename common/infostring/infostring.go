@@ -67,6 +67,8 @@ func (is *InfoString) Set(key, value string) {
 	for i := 0; i < len(is.Info); i++ {
 		if is.Info[i].Key == key {
 			is.Info[i].Value = value
+			return
 		}
 	}
+	is.Info = append(is.Info, Info{Key: key, Value: value})
 }
