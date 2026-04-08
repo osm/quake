@@ -10,6 +10,7 @@ import (
 
 	"github.com/osm/quake/client"
 	"github.com/osm/quake/common/context"
+	"github.com/osm/quake/common/infostring"
 	"github.com/osm/quake/common/rand"
 	"github.com/osm/quake/common/sequencer"
 	"github.com/osm/quake/packet"
@@ -23,7 +24,7 @@ var (
 	ErrNoTeam = errors.New("no team supplied")
 )
 
-const connectReadDeadline = time.Duration(13)
+const connectReadDeadline = 3 * time.Second
 
 type Client struct {
 	conn     *net.UDPConn
@@ -46,6 +47,7 @@ type Client struct {
 	name          string
 	ping          int16
 	team          string
+	userInfo      *infostring.InfoString
 	bottomColor   byte
 	topColor      byte
 
@@ -77,6 +79,7 @@ func New(name, team string, opts ...Option) (client.Client, error) {
 		name:         name,
 		ping:         999,
 		team:         team,
+		userInfo:     infostring.New(),
 	}
 
 	for _, opt := range opts {
@@ -103,5 +106,9 @@ func (c *Client) Quit() {
 
 	if c.seq.GetState() == sequencer.Connected {
 		time.Sleep(time.Duration(c.ping) * time.Millisecond)
+	}
+
+	if c.conn != nil {
+		_ = c.conn.Close()
 	}
 }

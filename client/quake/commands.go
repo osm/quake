@@ -44,39 +44,28 @@ func (c *Client) handleServerCommand(cmd command.Command) []command.Command {
 }
 
 func (c *Client) handleChallenge(cmd *s2cchallenge.Command) []command.Command {
-	userInfo := infostring.New(
-		infostring.WithKeyValue("name", c.name),
-		infostring.WithKeyValue("team", c.team),
-		infostring.WithKeyValue("topcolor", fmt.Sprintf("%d", c.topColor)),
-		infostring.WithKeyValue("bottomcolor", fmt.Sprintf("%d", c.bottomColor)),
-	)
+	if c.userInfo == nil {
+		c.userInfo = infostring.New()
+	}
+	c.userInfo.Set("name", c.name)
+	c.userInfo.Set("team", c.team)
+	c.userInfo.Set("topcolor", fmt.Sprintf("%d", c.topColor))
+	c.userInfo.Set("bottomcolor", fmt.Sprintf("%d", c.bottomColor))
 
 	if c.addrPort != "" {
-		userInfo.Info = append(userInfo.Info, infostring.Info{
-			Key:   "prx",
-			Value: c.addrPort,
-		})
+		c.userInfo.Set("prx", c.addrPort)
 	}
 
 	if c.clientVersion != "" {
-		userInfo.Info = append(userInfo.Info, infostring.Info{
-			Key:   "*client",
-			Value: c.clientVersion,
-		})
+		c.userInfo.Set("*client", c.clientVersion)
 	}
 
 	if c.isSpectator {
-		userInfo.Info = append(userInfo.Info, infostring.Info{
-			Key:   "spectator",
-			Value: "1",
-		})
+		c.userInfo.Set("spectator", "1")
 	}
 
 	if c.zQuakeEnabled {
-		userInfo.Info = append(userInfo.Info, infostring.Info{
-			Key:   "*z_ext",
-			Value: fmt.Sprintf("%d", c.zQuakeExtensions),
-		})
+		c.userInfo.Set("*z_ext", fmt.Sprintf("%d", c.zQuakeExtensions))
 	}
 
 	var extensions []*protocol.Extension
@@ -96,7 +85,7 @@ func (c *Client) handleChallenge(cmd *s2cchallenge.Command) []command.Command {
 			Version:     fmt.Sprintf("%v", c.ctx.GetProtocolVersion()),
 			QPort:       c.qPort,
 			ChallengeID: cmd.ChallengeID,
-			UserInfo:    userInfo,
+			UserInfo:    c.userInfo,
 			Extensions:  extensions,
 		},
 	}

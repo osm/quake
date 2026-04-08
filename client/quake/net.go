@@ -13,6 +13,7 @@ import (
 	"github.com/osm/quake/packet/command/connect"
 	"github.com/osm/quake/packet/command/getchallenge"
 	"github.com/osm/quake/packet/command/ip"
+	"github.com/osm/quake/packet/command/move"
 	"github.com/osm/quake/packet/svc"
 )
 
@@ -40,13 +41,16 @@ func (c *Client) Connect(addrPort string) error {
 		var cmds []command.Command
 
 		if err := c.conn.SetReadDeadline(
-			time.Now().Add(time.Millisecond * c.readDeadline),
+			time.Now().Add(c.readDeadline),
 		); err != nil {
 			c.logger.Printf("unable to set read deadline, %v\n", err)
 		}
 
 		n, _, err := c.conn.ReadFromUDP(buf)
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			if errors.Is(err, syscall.ECONNREFUSED) {
 				c.logger.Printf("lost connection - reconnecting in 5 seqonds")
 				time.Sleep(time.Second * 5)
@@ -55,6 +59,9 @@ func (c *Client) Connect(addrPort string) error {
 			}
 
 			if err, ok := err.(net.Error); ok && err.Timeout() {
+				if c.seq.GetState() == sequencer.Handshake {
+					c.sendChallenge()
+				}
 				isReadTimeout = true
 				goto process
 			}
@@ -122,11 +129,16 @@ func (c *Client) processCommands(
 		return
 	}
 
+	sendCmds := outCmds
+	if c.seq.GetState() == sequencer.Connected {
+		sendCmds = appendMoveIfMissing(sendCmds, c.getMove(outSeq))
+	}
+
 	if _, err := c.conn.Write((&clc.GameData{
 		Seq:      outSeq,
 		Ack:      outAck,
 		QPort:    c.qPort,
-		Commands: append(outCmds, c.getMove(outSeq)),
+		Commands: rewriteMoveChecksums(sendCmds, outSeq),
 	}).Bytes()); err != nil {
 		c.logger.Printf("unable to send game data, %v\n", err)
 	}
@@ -141,4 +153,24 @@ func (c *Client) sendChallenge() {
 	); err != nil {
 		c.logger.Printf("unable to send challenge, %v\n", err)
 	}
+}
+
+func appendMoveIfMissing(cmds []command.Command, fallback *move.Command) []command.Command {
+	for _, cmd := range cmds {
+		if _, ok := cmd.(*move.Command); ok {
+			return cmds
+		}
+	}
+	return append(cmds, fallback)
+}
+
+func rewriteMoveChecksums(cmds []command.Command, outSeq uint32) []command.Command {
+	for _, cmd := range cmds {
+		mv, ok := cmd.(*move.Command)
+		if !ok {
+			continue
+		}
+		mv.Checksum = mv.GetChecksum(outSeq - 1)
+	}
+	return cmds
 }
