@@ -54,6 +54,10 @@ func (s *Sequencer) GetState() State      { return s.state }
 func (s *Sequencer) SetPing(ping int16)   { s.ping = ping }
 func (s *Sequencer) GetPing() int16       { return s.ping }
 
+func (s *Sequencer) Acknowledge(incomingSeq, incomingAck uint32) {
+	s.incoming(incomingSeq, incomingAck)
+}
+
 func (s *Sequencer) Reset() {
 	s.incomingSeq = 0
 	s.incomingAck = 0
@@ -73,6 +77,10 @@ func (s *Sequencer) Process(
 	cmds []command.Command,
 ) (uint32, uint32, []command.Command, error) {
 	s.incoming(incomingSeq, incomingAck)
+	return s.outgoing(cmds)
+}
+
+func (s *Sequencer) Emit(cmds []command.Command) (uint32, uint32, []command.Command, error) {
 	return s.outgoing(cmds)
 }
 
