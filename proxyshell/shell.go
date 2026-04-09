@@ -8,7 +8,13 @@ import (
 
 	"github.com/osm/quake/common/infostring"
 	"github.com/osm/quake/packet"
+	"github.com/osm/quake/packet/clc"
+	"github.com/osm/quake/packet/command"
 	"github.com/osm/quake/packet/command/connect"
+	"github.com/osm/quake/packet/command/disconnect"
+	"github.com/osm/quake/packet/command/s2cconnection"
+	"github.com/osm/quake/packet/command/stringcmd"
+	"github.com/osm/quake/packet/command/stufftext"
 	"github.com/osm/quake/packet/svc"
 )
 
@@ -25,10 +31,12 @@ type Shell struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 
-	newHandlers      []func(string)
-	stringHandlers   []func(string, string)
-	upstreamHandlers []func(string, packet.Packet)
-	errorHandlers    []func(string, error)
+	shellPacketHandlers       []func(string, packet.Packet)
+	upstreamPacketHandlers    []func(string, packet.Packet)
+	upstreamErrorHandlers     []func(string, error)
+	shellInjectHandlers       []func(string, packet.Packet)
+	shellResetHandlers        []func(string)
+	shellDisconnectedHandlers []func(string)
 }
 
 type identity struct {
@@ -49,7 +57,10 @@ type session struct {
 	remoteID uint64
 	client   identity
 
-	reconnectBy time.Time
+	reconnectBy       time.Time
+	pendingNew        bool
+	pendingConnect    bool
+	pendingDisconnect bool
 }
 
 var errNoUpstream = errors.New("no upstream session")
@@ -65,60 +76,91 @@ func (s *Shell) IsInShell(clientID string) bool {
 	return s.state(clientID) == StateShell
 }
 
-func (s *Shell) OnNew(h func(string)) {
-	s.newHandlers = append(s.newHandlers, h)
+func (s *Shell) OnShellPacket(h func(string, packet.Packet)) {
+	s.shellPacketHandlers = append(s.shellPacketHandlers, h)
 }
 
-func (s *Shell) OnString(h func(string, string)) {
-	s.stringHandlers = append(s.stringHandlers, h)
-}
-
-func (s *Shell) OnUpstream(h func(string, packet.Packet)) {
-	s.upstreamHandlers = append(s.upstreamHandlers, h)
+func (s *Shell) OnUpstreamPacket(h func(string, packet.Packet)) {
+	s.upstreamPacketHandlers = append(s.upstreamPacketHandlers, h)
 }
 
 func (s *Shell) OnUpstreamError(h func(string, error)) {
-	s.errorHandlers = append(s.errorHandlers, h)
+	s.upstreamErrorHandlers = append(s.upstreamErrorHandlers, h)
 }
 
-func (s *Shell) Connect(clientID, target string) bool {
+func (s *Shell) OnShellInjectPacket(h func(string, packet.Packet)) {
+	s.shellInjectHandlers = append(s.shellInjectHandlers, h)
+}
+
+func (s *Shell) OnShellResetClient(h func(string)) {
+	s.shellResetHandlers = append(s.shellResetHandlers, h)
+}
+
+func (s *Shell) OnShellDisconnected(h func(string)) {
+	s.shellDisconnectedHandlers = append(s.shellDisconnectedHandlers, h)
+}
+
+func (s *Shell) ConnectUpstream(clientID, target string) (bool, bool) {
 	s.mu.Lock()
 
 	ss := s.sessionLocked(clientID)
 	sameTarget := ss.target == target
-	alreadyConnecting := ss.state == StateConnecting && ss.remote != nil
-	name := ss.client.name
+	alreadyConnecting := ss.state == StateConnecting
+	hasRemote := ss.remote != nil
 
-	if sameTarget && alreadyConnecting {
+	if sameTarget && (alreadyConnecting || hasRemote) {
 		s.mu.Unlock()
-		return false
+		return false, false
 	}
 
 	ss.target = target
-	ss.state = StateConnecting
 	ss.reconnectBy = time.Now().Add(5 * time.Second)
+	live := ss.state != StateShell
 
 	s.mu.Unlock()
 
-	s.logf("%s (%s) connecting to %s", name, clientID, target)
-	s.shutdownRemote(clientID)
+	if !live {
+		s.ensureRemoteConnected(clientID)
+		return true, false
+	}
 
-	return true
+	s.emitLocal(clientID, &stufftext.Command{String: "changing\n"})
+
+	s.mu.Lock()
+	ss = s.sessionLocked(clientID)
+	ss.pendingConnect = true
+	ss.pendingDisconnect = false
+	s.mu.Unlock()
+
+	return true, true
 }
 
-func (s *Shell) Disconnect(clientID string) {
+func (s *Shell) DisconnectUpstream(clientID string) bool {
 	s.mu.Lock()
 
 	ss := s.sessionLocked(clientID)
+	live := ss.state != StateShell
+	if live {
+		ss.target = ""
+		ss.pendingDisconnect = true
+		ss.pendingConnect = false
+		s.mu.Unlock()
+		s.emitLocal(clientID, &stufftext.Command{String: "changing\n"})
+		return true
+	}
+
 	ss.target = ""
 	ss.state = StateShell
 	ss.reconnectBy = time.Time{}
+	ss.pendingConnect = false
+	ss.pendingDisconnect = false
 	name := ss.client.name
 
 	s.mu.Unlock()
 
 	s.logf("%s (%s) disconnected from upstream", name, clientID)
 	s.shutdownRemote(clientID)
+	return false
 }
 
 func (s *Shell) Shutdown() {
@@ -141,7 +183,23 @@ func (s *Shell) WriteUpstream(
 	pkt packet.Packet,
 ) error {
 	s.mu.Lock()
-	remote := s.sessionLocked(clientID).remote
+	ss := s.sessionLocked(clientID)
+	remote := ss.remote
+	pendingNew := ss.pendingNew
+	if pendingNew {
+		if game, ok := pkt.(*clc.GameData); ok {
+			cmds := make([]command.Command, 0, len(game.Commands)+1)
+			cmds = append(cmds, &stringcmd.Command{String: "new"})
+			cmds = append(cmds, game.Commands...)
+			pkt = &clc.GameData{
+				Seq:      game.Seq,
+				Ack:      game.Ack,
+				QPort:    game.QPort,
+				Commands: cmds,
+			}
+			ss.pendingNew = false
+		}
+	}
 	s.mu.Unlock()
 
 	if remote == nil {
@@ -151,7 +209,7 @@ func (s *Shell) WriteUpstream(
 	return remote.WritePacket(pkt)
 }
 
-func (s *Shell) AttachUpstream(clientID string) bool {
+func (s *Shell) attachUpstream(clientID string) bool {
 	s.ensureRemoteConnected(clientID)
 
 	s.mu.Lock()
@@ -191,6 +249,29 @@ func (s *Shell) resetIfStale(clientID string) bool {
 func (s *Shell) logf(format string, args ...any) {
 	if s.log != nil {
 		s.log.Printf(format, args...)
+	}
+}
+
+func (s *Shell) emitLocal(clientID string, cmds ...command.Command) {
+	if len(cmds) == 0 {
+		return
+	}
+
+	pkt := &svc.GameData{Commands: cmds}
+	for _, h := range s.shellInjectHandlers {
+		h(clientID, pkt)
+	}
+}
+
+func (s *Shell) resetClient(clientID string) {
+	for _, h := range s.shellResetHandlers {
+		h(clientID)
+	}
+}
+
+func (s *Shell) emitDisconnected(clientID string) {
+	for _, h := range s.shellDisconnectedHandlers {
+		h(clientID)
 	}
 }
 
@@ -249,6 +330,8 @@ func (s *Shell) connectRemote(clientID, target string) {
 		old.Close()
 	}
 
+	s.logf("%s (%s) connecting to %s", client.name, clientID, target)
+
 	cmd := cloneConnectCommand(client.connect)
 	if cmd == nil {
 		cmd = buildUpstreamConnect(client)
@@ -256,7 +339,7 @@ func (s *Shell) connectRemote(clientID, target string) {
 
 	rc, err := newUpstreamSession(s.log, cmd)
 	if err != nil {
-		for _, h := range s.errorHandlers {
+		for _, h := range s.upstreamErrorHandlers {
 			h(clientID, err)
 		}
 		return
@@ -284,10 +367,33 @@ func (s *Shell) connectRemote(clientID, target string) {
 			return
 		}
 
-		if _, ok := pkt.(*svc.GameData); ok {
+		if oob, ok := pkt.(*svc.Connectionless); ok {
+			if _, ok := oob.Command.(*s2cconnection.Command); ok {
+				ss.pendingNew = true
+			}
+		}
+
+		if game, ok := pkt.(*svc.GameData); ok {
+			if ss.pendingConnect || ss.pendingDisconnect {
+				filtered := make([]command.Command, 0, len(game.Commands))
+				for _, raw := range game.Commands {
+					if _, ok := raw.(*disconnect.Command); ok {
+						continue
+					}
+					filtered = append(filtered, raw)
+				}
+				pkt = &svc.GameData{
+					Seq:      game.Seq,
+					Ack:      game.Ack,
+					Commands: filtered,
+				}
+			}
+
 			wasLive := ss.state == StateLive
 			ss.state = StateLive
 			name := ss.client.name
+			pendingConnect := ss.pendingConnect
+			pendingDisconnect := ss.pendingDisconnect
 
 			s.mu.Unlock()
 
@@ -295,8 +401,30 @@ func (s *Shell) connectRemote(clientID, target string) {
 				s.logf("%s (%s) connected to %s", name, clientID, target)
 			}
 
-			for _, h := range s.upstreamHandlers {
+			for _, h := range s.upstreamPacketHandlers {
 				h(clientID, pkt)
+			}
+
+			if pendingDisconnect {
+				s.mu.Lock()
+				ss := s.sessionLocked(clientID)
+				ss.pendingDisconnect = false
+				s.mu.Unlock()
+
+				s.disconnectTransition(clientID)
+				s.resetClient(clientID)
+				s.emitDisconnected(clientID)
+			}
+
+			if pendingConnect {
+				s.mu.Lock()
+				ss := s.sessionLocked(clientID)
+				ss.pendingConnect = false
+				s.mu.Unlock()
+
+				s.disconnectTransition(clientID)
+				s.resetClient(clientID)
+				s.attachUpstream(clientID)
 			}
 
 			return
@@ -304,16 +432,30 @@ func (s *Shell) connectRemote(clientID, target string) {
 
 		s.mu.Unlock()
 
-		for _, h := range s.upstreamHandlers {
+		for _, h := range s.upstreamPacketHandlers {
 			h(clientID, pkt)
 		}
 	}
 
 	if err := rc.Connect(target, cb); err != nil {
-		for _, h := range s.errorHandlers {
+		for _, h := range s.upstreamErrorHandlers {
 			h(clientID, err)
 		}
 	}
+}
+
+func (s *Shell) disconnectTransition(clientID string) {
+	s.mu.Lock()
+
+	ss := s.sessionLocked(clientID)
+	ss.state = StateShell
+	ss.reconnectBy = time.Time{}
+	name := ss.client.name
+
+	s.mu.Unlock()
+
+	s.logf("%s (%s) disconnected from upstream", name, clientID)
+	s.shutdownRemote(clientID)
 }
 
 func (s *Shell) shutdownRemote(clientID string) {

@@ -11,21 +11,34 @@ import (
 	"github.com/osm/quake/packet/command/stufftext"
 )
 
-func (s *Shell) HandleConnect(
+func (s *Shell) ProcessShellConnect(
 	clientID string,
 	cmd *connect.Command,
-) bool {
+) (bool, bool) {
 	reset := s.resetIfStale(clientID)
 	identity := s.captureShellConnect(clientID, cmd)
 	s.logf("%s (%s) connected to shell", identity.name, clientID)
 
-	return reset
+	for _, h := range s.shellPacketHandlers {
+		h(clientID, &clc.Connectionless{Command: cmd})
+	}
+
+	s.mu.Lock()
+	hasTarget := s.sessionLocked(clientID).target != ""
+	s.mu.Unlock()
+	s.ensureRemoteConnected(clientID)
+
+	return reset, hasTarget
 }
 
-func (s *Shell) HandleGameData(
+func (s *Shell) ProcessShellGameData(
 	clientID string,
 	pkt *clc.GameData,
 ) []command.Command {
+	for _, h := range s.shellPacketHandlers {
+		h(clientID, pkt)
+	}
+
 	var out []command.Command
 
 	for _, raw := range pkt.Commands {
@@ -35,16 +48,7 @@ func (s *Shell) HandleGameData(
 		}
 
 		if strings.EqualFold(strings.TrimSpace(cmd.String), "new") {
-			for _, h := range s.newHandlers {
-				h(clientID)
-			}
-
 			out = append(out, &stufftext.Command{String: "skins"})
-			continue
-		}
-
-		for _, h := range s.stringHandlers {
-			h(clientID, cmd.String)
 		}
 	}
 

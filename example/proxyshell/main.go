@@ -13,10 +13,8 @@ import (
 	"github.com/osm/quake/packet/clc"
 	"github.com/osm/quake/packet/command"
 	"github.com/osm/quake/packet/command/connect"
-	"github.com/osm/quake/packet/command/disconnect"
 	"github.com/osm/quake/packet/command/print"
 	"github.com/osm/quake/packet/command/stringcmd"
-	"github.com/osm/quake/packet/command/stufftext"
 	"github.com/osm/quake/packet/svc"
 	"github.com/osm/quake/proxyshell"
 	"github.com/osm/quake/server"
@@ -28,10 +26,9 @@ type proxyShell struct {
 	srv *quake.Server
 	sh  *proxyshell.Shell
 
-	mu                sync.Mutex
-	banner            map[string]bool
-	queue             map[string][]command.Command
-	disconnectPending map[string]bool
+	mu     sync.Mutex
+	banner map[string]bool
+	queue  map[string][]command.Command
 }
 
 func main() {
@@ -41,20 +38,26 @@ func main() {
 	logger := log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime)
 	srv := quake.New(logger)
 	ps := &proxyShell{
-		log:               logger,
-		srv:               &srv,
-		sh:                proxyshell.New(logger),
-		banner:            map[string]bool{},
-		queue:             map[string][]command.Command{},
-		disconnectPending: map[string]bool{},
+		log:    logger,
+		srv:    &srv,
+		sh:     proxyshell.New(logger),
+		banner: map[string]bool{},
+		queue:  map[string][]command.Command{},
 	}
 
-	ps.sh.OnNew(ps.handleShellNew)
-	ps.sh.OnString(func(clientID, s string) {
-		ps.handleShellString(clientID, s)
-	})
-	ps.sh.OnUpstream(ps.handleUpstreamPacket)
+	ps.sh.OnShellPacket(ps.handleShellPacket)
+	ps.sh.OnUpstreamPacket(ps.handleUpstreamPacket)
 	ps.sh.OnUpstreamError(ps.handleUpstreamError)
+	ps.sh.OnShellInjectPacket(func(clientID string, pkt packet.Packet) {
+		game, ok := pkt.(*svc.GameData)
+		if !ok {
+			return
+		}
+		ps.enqueueClientCommands(clientID, game.Commands...)
+	})
+	ps.sh.OnShellResetClient(func(clientID string) {
+		ps.srv.ResetClient(clientID)
+	})
 
 	srv.HandleFunc(ps.handleClientPacket)
 
@@ -84,7 +87,7 @@ func (p *proxyShell) handleClientPacket(
 		p.handleConnectPacket(clientID, localPkt)
 	case *clc.GameData:
 		if inShell {
-			cmds := p.sh.HandleGameData(clientID, localPkt)
+			cmds := p.sh.ProcessShellGameData(clientID, localPkt)
 			local := p.drainClientQueue(clientID)
 			if len(local) > 0 {
 				cmds = append(cmds, local...)
@@ -113,13 +116,13 @@ func (p *proxyShell) handleConnectPacket(
 	if !ok {
 		return
 	}
-	if p.sh.HandleConnect(clientID, cmd) {
+	reset, hasTarget := p.sh.ProcessShellConnect(clientID, cmd)
+	if reset {
 		p.mu.Lock()
 		p.banner[clientID] = false
 		p.queue[clientID] = nil
 		p.mu.Unlock()
 	}
-	hasTarget := p.sh.AttachUpstream(clientID)
 	p.mu.Lock()
 	p.banner[clientID] = !hasTarget
 	p.mu.Unlock()
@@ -132,9 +135,29 @@ func (p *proxyShell) handleConnectPacket(
 	)
 }
 
-func (p *proxyShell) handleShellString(clientID, s string) {
-	p.log.Printf("shell stringcmd: %q", s)
-	_, _ = p.handleShellCommand(clientID, s)
+func (p *proxyShell) handleShellPacket(
+	clientID string,
+	pkt packet.Packet,
+) {
+	game, ok := pkt.(*clc.GameData)
+	if !ok {
+		return
+	}
+
+	for _, raw := range game.Commands {
+		cmd, ok := raw.(*stringcmd.Command)
+		if !ok {
+			continue
+		}
+
+		if strings.EqualFold(strings.TrimSpace(cmd.String), "new") {
+			p.handleShellNew(clientID)
+			continue
+		}
+
+		p.log.Printf("shell stringcmd: %q", cmd.String)
+		_, _ = p.handleShellCommand(clientID, cmd.String)
+	}
 }
 
 func (p *proxyShell) handleShellNew(clientID string) {
@@ -233,30 +256,34 @@ func (p *proxyShell) handleShellCommand(clientID, s string) (string, bool) {
 			return "", false
 		}
 		target := strings.Join(args, " ")
-		if !p.sh.Connect(clientID, target) {
+		ok, drop := p.sh.ConnectUpstream(clientID, target)
+		if !ok {
 			p.enqueueClientCommands(
 				clientID,
 				&print.Command{ID: 2, String: "already connecting\n"},
 			)
 			return "", false
 		}
+
 		p.enqueueClientCommands(
 			clientID,
-			&stufftext.Command{String: "disconnect;wait;wait;wait;reconnect\n"},
 			&print.Command{ID: 2, String: "Connecting to " + target + "\n"},
-		)
-		p.flushClientQueueNow(clientID)
-		return "", false
-	case "disconnect":
-		p.enqueueClientCommands(
-			clientID,
-			&stufftext.Command{String: "changing\n"},
 		)
 		p.mu.Lock()
 		p.banner[clientID] = false
-		p.disconnectPending[clientID] = true
 		p.mu.Unlock()
-		return "drop", true
+		if drop {
+			return "drop", true
+		}
+		return "", false
+	case "disconnect":
+		p.mu.Lock()
+		p.banner[clientID] = false
+		p.mu.Unlock()
+		if p.sh.DisconnectUpstream(clientID) {
+			return "drop", true
+		}
+		return "", false
 	default:
 		return s, true
 	}
@@ -277,13 +304,7 @@ func (p *proxyShell) handleUpstreamPacket(
 
 	local := p.drainClientQueue(clientID)
 	cmds := make([]command.Command, 0, len(game.Commands)+len(local))
-	for _, raw := range game.Commands {
-		if _, ok := raw.(*disconnect.Command); ok &&
-			p.disconnectPending[clientID] {
-			continue
-		}
-		cmds = append(cmds, raw)
-	}
+	cmds = append(cmds, game.Commands...)
 	if len(local) > 0 {
 		cmds = append(cmds, local...)
 	}
@@ -293,19 +314,6 @@ func (p *proxyShell) handleUpstreamPacket(
 		Ack:      game.Ack,
 		Commands: cmds,
 	})
-
-	p.mu.Lock()
-	pending := p.disconnectPending[clientID]
-	if pending {
-		p.disconnectPending[clientID] = false
-	}
-	p.mu.Unlock()
-
-	if pending {
-		p.sh.Disconnect(clientID)
-		p.srv.ResetClient(clientID)
-		p.flushClientQueueNow(clientID)
-	}
 }
 
 func (p *proxyShell) handleUpstreamError(clientID string, err error) {
