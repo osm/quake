@@ -1,11 +1,14 @@
 package item
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/osm/quake/common/bsp"
 	"github.com/osm/quake/protocol"
 )
+
+const megaHealthSpawnflag = 2
 
 type Item struct {
 	Short       string
@@ -43,9 +46,11 @@ func FromBSPEntity(entity bsp.Entity) (Item, bool) {
 		return Item{Short: "MH", Long: "Mega Health", RespawnTime: 20}, true
 	}
 
-	if classname == "item_health" &&
-		strings.TrimSpace(entity.Value("spawnflags")) == "2" {
-		return Item{Short: "MH", Long: "Mega Health", RespawnTime: 20}, true
+	if classname == "item_health" {
+		spawnflags, err := strconv.Atoi(strings.TrimSpace(entity.Value("spawnflags")))
+		if err == nil && spawnflags&megaHealthSpawnflag != 0 {
+			return Item{Short: "MH", Long: "Mega Health", RespawnTime: 20}, true
+		}
 	}
 
 	return Item{}, false
