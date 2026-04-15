@@ -2,6 +2,8 @@ package event
 
 import "sort"
 
+const defaultEntityBaseOffset = 8
+
 func (r *Result) Players() []string {
 	seen := make(map[string]bool)
 	var out []string
@@ -49,5 +51,9 @@ func (r *Result) EntityBaseOffset() int {
 		return maxSlot + 1
 	}
 
-	return 8
+	return defaultEntityBaseOffset
+}
+
+func (r *Result) MapName() string {
+	return r.mapName
 }

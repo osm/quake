@@ -48,6 +48,12 @@ func (p *parser) handleStuffText(cmd *stufftext.Command) {
 
 func (p *parser) handleFullServerInfo(infoString string) {
 	info := infostring.Parse(infoString)
+
+	mapName := strings.TrimSpace(info.Get("map"))
+	if mapName != "" {
+		p.mapName = mapName
+	}
+
 	value := strings.TrimSpace(info.Get("maxclients"))
 	if value == "" {
 		return

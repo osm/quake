@@ -26,6 +26,7 @@ type parser struct {
 	lastSample   map[byte]Vec3
 	packetSlot   byte
 	maxClients   int
+	mapName      string
 	itemFlags    map[byte]int32
 	activeWeapon map[byte]int32
 	weaponFrames map[byte]byte
@@ -111,6 +112,7 @@ func (p *parser) result() *Result {
 	return &Result{
 		Events:     p.timeline(),
 		maxClients: p.maxClients,
+		mapName:    p.mapName,
 	}
 }
 

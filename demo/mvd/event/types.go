@@ -96,4 +96,5 @@ type Event struct {
 type Result struct {
 	Events     []Event
 	maxClients int
+	mapName    string
 }
