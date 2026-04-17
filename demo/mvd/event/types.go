@@ -9,6 +9,7 @@ const (
 	TypePlayerState Type = "player_state"
 	TypeShot        Type = "shot"
 	TypeKTX         Type = "ktx"
+	TypeTempEntity  Type = "temp_entity"
 )
 
 type KTXAction string
@@ -84,6 +85,17 @@ type KTXEvent struct {
 	PlayerEdict int
 }
 
+type TempEntity struct {
+	Time     float64
+	Kind     byte
+	Pos      Vec3
+	EndPos   Vec3
+	Entity   uint16
+	Count    byte
+	ColorA   byte
+	ColorLen byte
+}
+
 type Event struct {
 	Time  float64
 	Type  Type
@@ -91,6 +103,7 @@ type Event struct {
 	State *PlayerState
 	Shot  *Shot
 	KTX   *KTXEvent
+	Temp  *TempEntity
 }
 
 type Result struct {

@@ -6,6 +6,7 @@ import (
 	"github.com/osm/quake/packet/command/playerinfo"
 	"github.com/osm/quake/packet/command/print"
 	"github.com/osm/quake/packet/command/stufftext"
+	"github.com/osm/quake/packet/command/tempentity"
 	"github.com/osm/quake/packet/command/updatefrags"
 	"github.com/osm/quake/packet/command/updatestat"
 	"github.com/osm/quake/packet/command/updatestatlong"
@@ -101,6 +102,8 @@ func (p *parser) parse(data []byte) error {
 				p.handleUpdateStatLong(c)
 			case *print.Command:
 				p.handlePrint(c)
+			case *tempentity.Command:
+				p.handleTempEntity(c)
 			}
 		}
 	}
@@ -156,5 +159,13 @@ func (p *parser) appendKTXEvent(ktxEvent KTXEvent) {
 		Time: ktxEvent.Time,
 		Type: TypeKTX,
 		KTX:  &ktxEvent,
+	})
+}
+
+func (p *parser) appendTempEntity(tempEntity TempEntity) {
+	p.events = append(p.events, Event{
+		Time: tempEntity.Time,
+		Type: TypeTempEntity,
+		Temp: &tempEntity,
 	})
 }
