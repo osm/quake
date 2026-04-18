@@ -7,6 +7,7 @@ type Type string
 const (
 	TypeFrag        Type = "frag"
 	TypePlayerState Type = "player_state"
+	TypeProjectile  Type = "projectile"
 	TypeShot        Type = "shot"
 	TypeKTX         Type = "ktx"
 	TypeTempEntity  Type = "temp_entity"
@@ -76,6 +77,15 @@ type Shot struct {
 	Weapon     item.Item
 }
 
+type Projectile struct {
+	Time   float64
+	Entity int
+	Pos    Vec3
+	Angles Vec3
+	Model  string
+	Weapon item.Item
+}
+
 type KTXEvent struct {
 	Time        float64
 	Entity      int
@@ -97,13 +107,14 @@ type TempEntity struct {
 }
 
 type Event struct {
-	Time  float64
-	Type  Type
-	Frag  *Frag
-	State *PlayerState
-	Shot  *Shot
-	KTX   *KTXEvent
-	Temp  *TempEntity
+	Time       float64
+	Type       Type
+	Frag       *Frag
+	State      *PlayerState
+	Projectile *Projectile
+	Shot       *Shot
+	KTX        *KTXEvent
+	Temp       *TempEntity
 }
 
 type Result struct {

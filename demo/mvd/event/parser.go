@@ -3,8 +3,12 @@ package event
 import (
 	"github.com/osm/quake/common/context"
 	"github.com/osm/quake/demo/mvd"
+	"github.com/osm/quake/packet/command/deltapacketentities"
+	"github.com/osm/quake/packet/command/modellist"
+	"github.com/osm/quake/packet/command/packetentities"
 	"github.com/osm/quake/packet/command/playerinfo"
 	"github.com/osm/quake/packet/command/print"
+	"github.com/osm/quake/packet/command/spawnbaseline"
 	"github.com/osm/quake/packet/command/stufftext"
 	"github.com/osm/quake/packet/command/tempentity"
 	"github.com/osm/quake/packet/command/updatefrags"
@@ -35,6 +39,8 @@ type parser struct {
 	armorBySlot  map[byte]int
 	fragsBySlot  map[byte]int
 
+	entityStateReconstructor *entityStateReconstructor
+
 	events          []Event
 	matchStartIndex int
 }
@@ -49,19 +55,20 @@ func Parse(data []byte) (*Result, error) {
 
 func newParser() *parser {
 	return &parser{
-		playerNames:     make(map[byte]string),
-		playerTeams:     make(map[byte]string),
-		slotsByName:     make(map[string]byte),
-		positions:       make(map[byte]Vec3),
-		viewAngles:      make(map[byte]Vec3),
-		lastSample:      make(map[byte]Vec3),
-		itemFlags:       make(map[byte]int32),
-		activeWeapon:    make(map[byte]int32),
-		weaponFrames:    make(map[byte]byte),
-		healthBySlot:    make(map[byte]int),
-		armorBySlot:     make(map[byte]int),
-		fragsBySlot:     make(map[byte]int),
-		matchStartIndex: -1,
+		playerNames:              make(map[byte]string),
+		playerTeams:              make(map[byte]string),
+		slotsByName:              make(map[string]byte),
+		positions:                make(map[byte]Vec3),
+		viewAngles:               make(map[byte]Vec3),
+		lastSample:               make(map[byte]Vec3),
+		itemFlags:                make(map[byte]int32),
+		activeWeapon:             make(map[byte]int32),
+		weaponFrames:             make(map[byte]byte),
+		healthBySlot:             make(map[byte]int),
+		armorBySlot:              make(map[byte]int),
+		fragsBySlot:              make(map[byte]int),
+		entityStateReconstructor: newEntityStateReconstructor(),
+		matchStartIndex:          -1,
 	}
 }
 
@@ -102,6 +109,20 @@ func (p *parser) parse(data []byte) error {
 				p.handleUpdateStatLong(c)
 			case *print.Command:
 				p.handlePrint(c)
+			case *modellist.Command:
+				p.entityStateReconstructor.recordModelList(c)
+			case *spawnbaseline.Command:
+				p.entityStateReconstructor.recordSpawnBaseline(c)
+			case *packetentities.Command:
+				for _, projectile := range p.entityStateReconstructor.projectilesFromPacketEntities(c) {
+					projectile.Time = p.elapsed
+					p.appendProjectile(projectile)
+				}
+			case *deltapacketentities.Command:
+				for _, projectile := range p.entityStateReconstructor.projectilesFromDeltaPacketEntities(c) {
+					projectile.Time = p.elapsed
+					p.appendProjectile(projectile)
+				}
 			case *tempentity.Command:
 				p.handleTempEntity(c)
 			}
@@ -151,6 +172,14 @@ func (p *parser) appendShot(shot Shot) {
 		Time: shot.Time,
 		Type: TypeShot,
 		Shot: &shot,
+	})
+}
+
+func (p *parser) appendProjectile(projectile Projectile) {
+	p.events = append(p.events, Event{
+		Time:       projectile.Time,
+		Type:       TypeProjectile,
+		Projectile: &projectile,
 	})
 }
 
