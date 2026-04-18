@@ -3,6 +3,7 @@ package event
 import (
 	"github.com/osm/quake/common/context"
 	"github.com/osm/quake/demo/mvd"
+	"github.com/osm/quake/packet/command/damage"
 	"github.com/osm/quake/packet/command/deltapacketentities"
 	"github.com/osm/quake/packet/command/modellist"
 	"github.com/osm/quake/packet/command/packetentities"
@@ -97,6 +98,8 @@ func (p *parser) parse(data []byte) error {
 			switch c := command.(type) {
 			case *updateuserinfo.Command:
 				p.handleUpdateUserInfo(c)
+			case *damage.Command:
+				p.handleDamage(c)
 			case *stufftext.Command:
 				p.handleStuffText(c)
 			case *playerinfo.Command:
@@ -156,6 +159,14 @@ func (p *parser) appendFrag(frag Frag) {
 		Time: frag.Time,
 		Type: TypeFrag,
 		Frag: &frag,
+	})
+}
+
+func (p *parser) appendDamage(damage Damage) {
+	p.events = append(p.events, Event{
+		Time:   damage.Time,
+		Type:   TypeDamage,
+		Damage: &damage,
 	})
 }
 

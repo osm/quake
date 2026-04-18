@@ -5,6 +5,7 @@ import "github.com/osm/quake/common/item"
 type Type string
 
 const (
+	TypeDamage      Type = "damage"
 	TypeFrag        Type = "frag"
 	TypePlayerState Type = "player_state"
 	TypeProjectile  Type = "projectile"
@@ -38,6 +39,15 @@ type Frag struct {
 	Killer string
 	Weapon item.Item
 	Pos    Vec3
+}
+
+type Damage struct {
+	Time   float64
+	Edict  int
+	Player string
+	Pos    Vec3
+	Armor  int
+	Blood  int
 }
 
 type PlayerState struct {
@@ -109,6 +119,7 @@ type TempEntity struct {
 type Event struct {
 	Time       float64
 	Type       Type
+	Damage     *Damage
 	Frag       *Frag
 	State      *PlayerState
 	Projectile *Projectile

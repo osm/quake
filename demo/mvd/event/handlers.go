@@ -9,6 +9,7 @@ import (
 	"github.com/osm/quake/common/death"
 	"github.com/osm/quake/common/infostring"
 	"github.com/osm/quake/common/item"
+	"github.com/osm/quake/packet/command/damage"
 	"github.com/osm/quake/packet/command/playerinfo"
 	"github.com/osm/quake/packet/command/print"
 	"github.com/osm/quake/packet/command/stufftext"
@@ -34,6 +35,35 @@ func (p *parser) handleUpdateUserInfo(cmd *updateuserinfo.Command) {
 
 	p.playerNames[cmd.PlayerIndex] = name
 	p.slotsByName[normalizeName(name)] = cmd.PlayerIndex
+}
+
+func (p *parser) handleDamage(cmd *damage.Command) {
+	if cmd == nil {
+		return
+	}
+
+	playerName := p.playerName(p.packetSlot)
+	if playerName == "" {
+		return
+	}
+
+	position, ok := p.positions[p.packetSlot]
+	if !ok {
+		position = Vec3{
+			X: cmd.Coord[0],
+			Y: cmd.Coord[1],
+			Z: cmd.Coord[2],
+		}
+	}
+
+	p.appendDamage(Damage{
+		Time:   p.elapsed,
+		Edict:  p.playerEdict(p.packetSlot),
+		Player: playerName,
+		Pos:    position,
+		Armor:  int(cmd.Armor),
+		Blood:  int(cmd.Blood),
+	})
 }
 
 func (p *parser) handleStuffText(cmd *stufftext.Command) {
