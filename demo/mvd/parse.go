@@ -5,6 +5,8 @@ import (
 
 	"github.com/osm/quake/common/buffer"
 	"github.com/osm/quake/common/context"
+	"github.com/osm/quake/packet/command/disconnect"
+	"github.com/osm/quake/packet/svc"
 	"github.com/osm/quake/protocol"
 	"github.com/osm/quake/protocol/mvd"
 )
@@ -12,7 +14,8 @@ import (
 var ErrUnknownType = errors.New("unknown type")
 
 type Demo struct {
-	Data []Data
+	Data         []Data
+	TrailingData []byte
 }
 
 type Data struct {
@@ -31,6 +34,7 @@ func (d *Demo) Bytes() []byte {
 	for i := 0; i < len(d.Data); i++ {
 		buf.PutBytes(d.Data[i].Bytes())
 	}
+	buf.PutBytes(d.TrailingData)
 
 	return buf.Bytes()
 }
@@ -126,8 +130,31 @@ func Parse(ctx *context.Context, data []byte) (*Demo, error) {
 		}
 
 		cmd.Data = append(cmd.Data, data)
+		if data.endsDemo() {
+			cmd.TrailingData = append([]byte(nil), buf.Bytes()[buf.Off():]...)
+			break
+		}
 	}
 
 end:
 	return &cmd, nil
+}
+
+func (d Data) endsDemo() bool {
+	if d.Read == nil {
+		return false
+	}
+
+	gd, ok := d.Read.Packet.(*svc.GameData)
+	if !ok {
+		return false
+	}
+
+	for _, cmd := range gd.Commands {
+		if _, ok := cmd.(*disconnect.Command); ok {
+			return true
+		}
+	}
+
+	return false
 }
