@@ -9,15 +9,18 @@ import (
 )
 
 type HiddenCommand struct {
-	Size    uint32
-	Type    uint16
-	Command command.Command
+	Size          uint32
+	Type          uint16
+	Command       command.Command
+	NoBlockHeader bool
 }
 
 func (cmd *HiddenCommand) Bytes() []byte {
 	buf := buffer.New()
 
-	buf.PutUint32(cmd.Size)
+	if !cmd.NoBlockHeader {
+		buf.PutUint32(cmd.Size)
+	}
 	buf.PutUint16(cmd.Type)
 	buf.PutBytes(cmd.Command.Bytes())
 
@@ -33,12 +36,22 @@ func parseHiddenCommands(ctx *context.Context, data []byte) ([]*HiddenCommand, e
 	for buf.Off() < buf.Len() {
 		var cmd HiddenCommand
 
-		if cmd.Size, err = buf.GetUint32(); err != nil {
-			return nil, err
-		}
+		if buf.Len()-buf.Off() < 6 {
+			cmd.NoBlockHeader = true
 
-		if cmd.Type, err = buf.GetUint16(); err != nil {
-			return nil, err
+			if cmd.Type, err = buf.GetUint16(); err != nil {
+				return nil, err
+			}
+
+			cmd.Size = uint32(buf.Len() - buf.Off())
+		} else {
+			if cmd.Size, err = buf.GetUint32(); err != nil {
+				return nil, err
+			}
+
+			if cmd.Type, err = buf.GetUint16(); err != nil {
+				return nil, err
+			}
 		}
 
 		var c command.Command
