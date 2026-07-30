@@ -42,10 +42,13 @@ type Proxy struct {
 }
 
 type Client struct {
-	addr    *net.UDPAddr
-	conn    *net.UDPConn
-	connect *connect.Command
-	count   int
+	addr        *net.UDPAddr
+	conn        *net.UDPConn
+	connect     *connect.Command
+	count       int
+	logger      *log.Logger
+	clcWriterMu sync.Mutex
+	clcWriter   *packetWriter
 
 	CLCInject    CommandQueue
 	SVCInject    CommandQueue
@@ -152,7 +155,7 @@ func (p *Proxy) Serve(addrPort string) error {
 			}
 		}
 
-		if _, err := client.conn.Write(packet.Bytes()); err != nil {
+		if err := client.writeCLC(packet.Bytes()); err != nil {
 			p.logger.Printf("unable to write command, %v\n", err)
 		}
 
@@ -311,6 +314,7 @@ func (p *Proxy) addClient(addr *net.UDPAddr, conn *net.UDPConn, cmd *connect.Com
 	p.clients[key].conn = conn
 	p.clients[key].connect = cmd
 	p.clients[key].count += 1
+	p.clients[key].logger = p.logger
 
 	return p.clients[key]
 }
@@ -326,4 +330,5 @@ func (p *Proxy) removeClient(client *Client) {
 	p.clientsMu.Lock()
 	defer p.clientsMu.Unlock()
 	delete(p.clients, client.addr.String())
+	client.closeCLCWriter()
 }
