@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/osm/quake/demo/qwd"
 	"github.com/osm/quake/demo/qwz"
-	"github.com/osm/quake/demo/qwz/assets"
-	"github.com/osm/quake/demo/qwz/freq"
-	"github.com/osm/quake/demo/qwz/standard"
-	"github.com/osm/quake/demo/qwz/state"
+	"github.com/osm/quake/protocol"
+	"github.com/osm/quake/qizmo/assets"
+	"github.com/osm/quake/qizmo/freq"
+	"github.com/osm/quake/qizmo/standard"
+	"github.com/osm/quake/qizmo/state"
 )
 
 type voiceFrame struct {
@@ -279,17 +281,7 @@ func decodeQWZ(qwzData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("load embedded compress data: %w", err)
 	}
 
-	decodeAssets := assets.Assets{
-		PrecacheModels:     assets.PrecacheModels,
-		PrecacheSounds:     assets.PrecacheSounds,
-		CenterPrintStrings: assets.EmbeddedStringTable(assets.CenterPrintStrings),
-		PrintMode3Strings:  assets.EmbeddedStringTable(assets.PrintMode3Strings),
-		PrintStrings:       assets.EmbeddedStringTable(assets.PrintStrings),
-		SetInfoStrings:     assets.EmbeddedStringTable(assets.SetInfoStrings),
-		StuffTextStrings:   assets.EmbeddedStringTable(assets.StuffTextStrings),
-	}
-
-	qwdData, err := qwz.Decode(qwzData, ft, decodeAssets)
+	qwdData, err := qwz.Decode(qwzData, ft, assets.Embedded())
 	if err != nil {
 		return nil, err
 	}
@@ -303,31 +295,31 @@ func extractVoiceFrames(qwdData []byte) ([]voiceFrame, error) {
 	offset := 0
 
 	for record := 0; offset < len(qwdData); record++ {
-		if len(qwdData)-offset < 5 {
+		if len(qwdData)-offset < qwd.RecordHeaderSize {
 			return nil, fmt.Errorf("truncated record header at %d", offset)
 		}
 
 		timestamp := math.Float32frombits(
-			binary.LittleEndian.Uint32(qwdData[offset : offset+4]),
+			binary.LittleEndian.Uint32(qwdData[offset : offset+qwd.TimestampSize]),
 		)
-		offset += 4
+		offset += qwd.TimestampSize
 
 		recordType := qwdData[offset]
 		offset++
 
 		switch recordType {
-		case 0x00:
-			if len(qwdData)-offset < 0x24 {
+		case protocol.DemoCmd:
+			if len(qwdData)-offset < qwd.CmdPayloadSize {
 				return nil, fmt.Errorf("truncated DEMO_CMD at record %d", record)
 			}
-			offset += 0x24
-		case 0x01:
-			if len(qwdData)-offset < 4 {
+			offset += qwd.CmdPayloadSize
+		case protocol.DemoRead:
+			if len(qwdData)-offset < qwd.ReadSizeFieldSize {
 				return nil, fmt.Errorf("truncated DEMO_READ size at record %d", record)
 			}
 
-			size := int(binary.LittleEndian.Uint32(qwdData[offset : offset+4]))
-			offset += 4
+			size := int(binary.LittleEndian.Uint32(qwdData[offset : offset+qwd.ReadSizeFieldSize]))
+			offset += qwd.ReadSizeFieldSize
 
 			if len(qwdData)-offset < size {
 				return nil, fmt.Errorf("truncated DEMO_READ payload at record %d", record)
@@ -336,9 +328,9 @@ func extractVoiceFrames(qwdData []byte) ([]voiceFrame, error) {
 			payload := qwdData[offset : offset+size]
 			offset += size
 
-			if len(payload) < 8 {
+			if len(payload) < protocol.QWServerPacketHeaderSize {
 				if len(payload) >= 4 &&
-					binary.LittleEndian.Uint32(payload[:4]) == 0xffffffff {
+					binary.LittleEndian.Uint32(payload[:4]) == protocol.QWConnectionlessSequence {
 					continue
 				}
 
@@ -349,12 +341,12 @@ func extractVoiceFrames(qwdData []byte) ([]voiceFrame, error) {
 			}
 
 			seq := binary.LittleEndian.Uint32(payload[:4])
-			if seq == 0xffffffff {
+			if seq == protocol.QWConnectionlessSequence {
 				continue
 			}
 
-			decoder := standard.New(packet)
-			decoder.HandleFunc(standard.QizmoVoice, func(payload []byte) {
+			tracker := standard.NewTracker(packet)
+			tracker.HandleVoice(func(payload []byte) {
 				frames = append(frames, voiceFrame{
 					record:    record,
 					frame:     len(frames),
@@ -364,7 +356,7 @@ func extractVoiceFrames(qwdData []byte) ([]voiceFrame, error) {
 				})
 			})
 
-			err := decoder.Decode(payload, seq)
+			err := tracker.Observe(payload, seq)
 			if err != nil {
 				return nil, fmt.Errorf(
 					"parse packet at record %d: %w",
@@ -372,11 +364,11 @@ func extractVoiceFrames(qwdData []byte) ([]voiceFrame, error) {
 					err,
 				)
 			}
-		case 0x02:
-			if len(qwdData)-offset < 8 {
+		case protocol.DemoSet:
+			if len(qwdData)-offset < qwd.SetPayloadSize {
 				return nil, fmt.Errorf("truncated DEMO_SET at record %d", record)
 			}
-			offset += 8
+			offset += qwd.SetPayloadSize
 		default:
 			return nil, fmt.Errorf(
 				"unknown qwd record type 0x%02x at record %d",

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/osm/quake/packet/command"
+	"github.com/osm/quake/protocol"
 )
 
 var ErrRateLimit = errors.New("rate limit reached")
@@ -85,11 +86,11 @@ func (s *Sequencer) Emit(cmds []command.Command) (uint32, uint32, []command.Comm
 }
 
 func (s *Sequencer) incoming(incomingSeq, incomingAck uint32) {
-	isIncomingSeqReliable := incomingSeq>>31 == 1
-	isIncomingAckReliable := incomingAck>>31 == 1
+	isIncomingSeqReliable := incomingSeq&protocol.QWSequenceReliableBit != 0
+	isIncomingAckReliable := incomingAck&protocol.QWSequenceReliableBit != 0
 
-	incomingSeq = incomingSeq & 0x7fffffff
-	incomingAck = incomingAck & 0x7fffffff
+	incomingSeq &= protocol.QWSequenceMask
+	incomingAck &= protocol.QWSequenceMask
 
 	if incomingSeq < s.incomingSeq {
 		return
@@ -131,12 +132,12 @@ func (s *Sequencer) outgoing(cmds []command.Command) (uint32, uint32, []command.
 
 	outgoingSeq := s.outgoingSeq
 	if isReliable {
-		outgoingSeq = s.outgoingSeq | (1 << 31)
+		outgoingSeq |= protocol.QWSequenceReliableBit
 	}
 
 	outgoingAck := s.incomingSeq
 	if s.isIncomingSeqReliable {
-		outgoingAck = s.incomingSeq | (1 << 31)
+		outgoingAck |= protocol.QWSequenceReliableBit
 	}
 
 	outgoingCmds := []command.Command{}

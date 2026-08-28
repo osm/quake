@@ -55,7 +55,9 @@ func parseConnectionless(ctx *context.Context, buf *buffer.Buffer) (*Connectionl
 	case protocol.SVCDisconnect:
 		cmd, err = disconnect.Parse(ctx, buf)
 	default:
-		cmd, err = passthrough.Parse(ctx, buf, "")
+		// The type byte has already been consumed. Preserve it so unknown and
+		// proxy-specific connectionless packets remain byte-identical.
+		cmd, err = passthrough.Parse(ctx, buf, string([]byte{typ}))
 	}
 
 	if err != nil {

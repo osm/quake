@@ -5,6 +5,14 @@ import (
 	"github.com/osm/quake/protocol"
 )
 
+const (
+	TimestampSize     = 4
+	RecordHeaderSize  = TimestampSize + 1
+	CmdPayloadSize    = 36
+	ReadSizeFieldSize = 4
+	SetPayloadSize    = 8
+)
+
 type Data struct {
 	Timestamp float32
 	Command   byte

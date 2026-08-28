@@ -7,6 +7,20 @@ const (
 	VersionQW    uint32 = 28
 )
 
+const (
+	QWMaxClients             = 32
+	QWPacketAckOffset        = 4
+	QWServerPacketHeaderSize = 8
+	QWClientPacketHeaderSize = 10
+
+	QWSequenceReliableBit    uint32 = 1 << 31
+	QWSequenceMask                  = QWSequenceReliableBit - 1
+	QWConnectionlessSequence        = ^uint32(0)
+
+	QWServerDataSpectatorBit = 1 << 7
+	QWServerDataPlayerMask   = QWServerDataSpectatorBit - 1
+)
+
 type CommandType int
 
 const (
@@ -77,7 +91,6 @@ const (
 	SVCServerInfo          = 52
 	SVCUpdatePL            = 53
 	SVCNails2              = 54
-	SVCQizmoVoice          = 83
 )
 
 const (

@@ -239,7 +239,7 @@ func parseCommandQW(ctx *context.Context, buf *buffer.Buffer, cmd *Command) erro
 		if cmd.PlayerNumber, err = buf.ReadByte(); err != nil {
 			return err
 		}
-		if cmd.PlayerNumber&128 != 0 {
+		if cmd.PlayerNumber&protocol.QWServerDataSpectatorBit != 0 {
 			cmd.Spectator = true
 		}
 	}

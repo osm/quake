@@ -1,4 +1,4 @@
-package qizmovoice
+package qizmostring
 
 import (
 	"github.com/osm/quake/common/buffer"
@@ -7,17 +7,20 @@ import (
 )
 
 type Command struct {
-	Data []byte
+	String string
 }
 
 func (cmd *Command) Bytes() []byte {
-	return append([]byte{qizmo.SVCVoice}, cmd.Data...)
+	buf := buffer.New()
+	buf.PutByte(qizmo.SVCString)
+	buf.PutString(cmd.String)
+	return buf.Bytes()
 }
 
 func Parse(ctx *context.Context, buf *buffer.Buffer) (*Command, error) {
-	data, err := buf.GetBytes(qizmo.SVCVoicePayloadSize)
+	value, err := buf.GetString()
 	if err != nil {
 		return nil, err
 	}
-	return &Command{Data: data}, nil
+	return &Command{String: value}, nil
 }

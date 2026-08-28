@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/osm/quake/demo/qwz"
-	"github.com/osm/quake/demo/qwz/assets"
-	"github.com/osm/quake/demo/qwz/freq"
+	"github.com/osm/quake/qizmo/assets"
+	"github.com/osm/quake/qizmo/freq"
 )
 
 func main() {
@@ -34,17 +34,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	da := assets.Assets{
-		PrecacheModels:     assets.PrecacheModels,
-		PrecacheSounds:     assets.PrecacheSounds,
-		CenterPrintStrings: assets.EmbeddedStringTable(assets.CenterPrintStrings),
-		PrintMode3Strings:  assets.EmbeddedStringTable(assets.PrintMode3Strings),
-		PrintStrings:       assets.EmbeddedStringTable(assets.PrintStrings),
-		SetInfoStrings:     assets.EmbeddedStringTable(assets.SetInfoStrings),
-		StuffTextStrings:   assets.EmbeddedStringTable(assets.StuffTextStrings),
-	}
-
-	qwdData, err := qwz.Decode(qwzData, ft, da)
+	qwdData, err := qwz.Decode(qwzData, ft, assets.Embedded())
 	if err != nil {
 		if len(os.Args) == 2 {
 			fmt.Fprintf(os.Stderr, "decode %s: %v\n", os.Args[1], err)

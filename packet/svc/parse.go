@@ -7,7 +7,7 @@ import (
 )
 
 type Options struct {
-	QWZCompatibility bool
+	QizmoCompatibility bool
 }
 
 func Parse(ctx *context.Context, data []byte) (packet.Packet, error) {

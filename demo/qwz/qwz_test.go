@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/osm/quake/demo/qwz"
-	"github.com/osm/quake/demo/qwz/assets"
-	"github.com/osm/quake/demo/qwz/freq"
+	"github.com/osm/quake/qizmo/assets"
+	"github.com/osm/quake/qizmo/freq"
 )
 
 var fixtureChecksums = map[string]string{
@@ -62,15 +62,7 @@ func TestDecodeFixtures(t *testing.T) {
 		t.Fatalf("new freq tables: %v", err)
 	}
 
-	da := assets.Assets{
-		PrecacheModels:     assets.PrecacheModels,
-		PrecacheSounds:     assets.PrecacheSounds,
-		CenterPrintStrings: assets.EmbeddedStringTable(assets.CenterPrintStrings),
-		PrintMode3Strings:  assets.EmbeddedStringTable(assets.PrintMode3Strings),
-		PrintStrings:       assets.EmbeddedStringTable(assets.PrintStrings),
-		SetInfoStrings:     assets.EmbeddedStringTable(assets.SetInfoStrings),
-		StuffTextStrings:   assets.EmbeddedStringTable(assets.StuffTextStrings),
-	}
+	da := assets.Embedded()
 
 	qwzPaths, err := filepath.Glob(filepath.Join("testdata", "*.qwz"))
 	if err != nil {

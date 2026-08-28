@@ -37,6 +37,8 @@ import (
 	"github.com/osm/quake/packet/command/particle"
 	"github.com/osm/quake/packet/command/playerinfo"
 	"github.com/osm/quake/packet/command/print"
+	"github.com/osm/quake/packet/command/qizmoblock"
+	"github.com/osm/quake/packet/command/qizmostring"
 	"github.com/osm/quake/packet/command/qizmovoice"
 	"github.com/osm/quake/packet/command/sellscreen"
 	"github.com/osm/quake/packet/command/serverdata"
@@ -68,9 +70,12 @@ import (
 	"github.com/osm/quake/packet/command/version"
 	"github.com/osm/quake/protocol"
 	"github.com/osm/quake/protocol/fte"
+	"github.com/osm/quake/protocol/qizmo"
 )
 
 var ErrUnknownCommandType = errors.New("unknown command type")
+
+const qizmoUnsupportedSVCMin = 0x4a
 
 type GameData struct {
 	IsMVD bool
@@ -137,8 +142,12 @@ process:
 			return nil, err
 		}
 
-		if opts.QWZCompatibility && typ == 0 {
+		if opts.QizmoCompatibility && typ == 0 {
 			break
+		}
+		if opts.QizmoCompatibility && typ >= qizmoUnsupportedSVCMin &&
+			!qizmo.IsServiceOpcode(typ) {
+			return &pkg, nil
 		}
 
 		if pkg.IsNQ && typ&128 != 0 {
@@ -255,7 +264,11 @@ process:
 			cmd, err = updatepl.Parse(ctx, buf)
 		case protocol.SVCNails2:
 			cmd, err = nails2.Parse(ctx, buf)
-		case protocol.SVCQizmoVoice:
+		case qizmo.SVCString:
+			cmd, err = qizmostring.Parse(ctx, buf)
+		case qizmo.SVCBlock:
+			cmd, err = qizmoblock.Parse(ctx, buf)
+		case qizmo.SVCVoice:
 			cmd, err = qizmovoice.Parse(ctx, buf)
 		case fte.SVCSpawnStatic:
 			cmd, err = ftespawnstatic.Parse(ctx, buf)
@@ -266,9 +279,6 @@ process:
 		case fte.SVCVoiceChat:
 			cmd, err = ftevoicechats.Parse(ctx, buf)
 		default:
-			if opts.QWZCompatibility && typ >= 0x4a {
-				return &pkg, nil
-			}
 			return nil, ErrUnknownCommandType
 		}
 
