@@ -1,6 +1,13 @@
 package state
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"github.com/osm/quake/protocol"
+	"github.com/osm/quake/qizmo/internal/wire"
+)
+
+const entityFieldMask = protocol.URemove - 1
 
 const (
 	playerRecordWords = 12
@@ -8,6 +15,7 @@ const (
 )
 
 type PlayerRecord [playerRecordWords]uint32
+type PlayerRecordBytes [playerRecordWords * 4]byte
 
 type playerHistory struct {
 	sequence uint32
@@ -37,40 +45,48 @@ func SetPlayerRecordByte(record *PlayerRecord, offset int, value byte) {
 	record[word] = (record[word] & ^mask) | (uint32(value) << shift)
 }
 
-func PlayerRecordBytesLE(r PlayerRecord) [48]byte {
-	var b [48]byte
+func PlayerRecordBytesLE(r PlayerRecord) PlayerRecordBytes {
+	var b PlayerRecordBytes
 
-	for i := 0; i < 12; i++ {
+	for i := range r {
 		binary.LittleEndian.PutUint32(b[i*4:(i+1)*4], r[i])
 	}
 
 	return b
 }
 
-func PlayerRecordFromBytesLE(b [48]byte) PlayerRecord {
+func PlayerRecordFromBytesLE(b PlayerRecordBytes) PlayerRecord {
 	var r PlayerRecord
 
-	for i := 0; i < 12; i++ {
+	for i := range r {
 		r[i] = binary.LittleEndian.Uint32(b[i*4 : (i+1)*4])
 	}
 
 	return r
 }
 
-func PlayerRecordUint16(b *[48]byte, offset int) uint16 {
+func PlayerRecordUint16(b *PlayerRecordBytes, offset int) uint16 {
 	return binary.LittleEndian.Uint16(b[offset : offset+2])
 }
 
-func SetPlayerRecordUint16(b *[48]byte, offset int, value uint16) {
+func SetPlayerRecordUint16(b *PlayerRecordBytes, offset int, value uint16) {
 	binary.LittleEndian.PutUint16(b[offset:offset+2], value)
 }
 
 func EntityNumber(record EntityRecord) uint16 {
-	return binary.LittleEndian.Uint16(record[0:2])
+	return binary.LittleEndian.Uint16(record[wire.EntityNumberOffset:])
 }
 
 func SetEntityNumber(record *EntityRecord, number uint16) {
-	binary.LittleEndian.PutUint16(record[0:2], number)
+	binary.LittleEndian.PutUint16(record[wire.EntityNumberOffset:], number)
+}
+
+func EntityMask(record EntityRecord) uint16 {
+	return binary.LittleEndian.Uint16(record[wire.EntityMaskOffset:])
+}
+
+func SetEntityMask(record *EntityRecord, mask uint16) {
+	binary.LittleEndian.PutUint16(record[wire.EntityMaskOffset:], mask&entityFieldMask)
 }
 
 func EntityRecordByte(record EntityRecord, offset int) byte {

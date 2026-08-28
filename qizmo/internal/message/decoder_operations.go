@@ -8,16 +8,16 @@ import (
 	"github.com/osm/quake/qizmo/freq"
 )
 
-func (d *packetDecoder) decodeTrailingOperation(
+func (d *packetDecoder) decodeOperation(
 	out []byte,
-	svcCode byte,
+	opcode byte,
 	options DecodingOptions,
 ) ([]byte, error) {
-	if codec, ok := fixedOperationCodecs[svcCode]; ok {
+	if codec, ok := fixedOperationCodecs[opcode]; ok {
 		return d.decodeFixedOperation(out, codec)
 	}
 
-	switch svcCode {
+	switch opcode {
 	case protocol.SVCSound:
 		return d.decodeSVCSound(out)
 	case protocol.SVCPrint:
@@ -66,23 +66,8 @@ func (d *packetDecoder) decodeTrailingOperation(
 		}
 		return append(out, body...), nil
 	default:
-		return nil, fmt.Errorf("unsupported svc opcode 0x%02x", svcCode)
+		return nil, fmt.Errorf("unsupported svc opcode 0x%02x", opcode)
 	}
-}
-
-func (d *packetDecoder) decodeSVCMuzzleFlash(out []byte) ([]byte, error) {
-	lo, err := d.rd.DecodeFreqByte(d.ft, freq.SVCTEntBeamEntityLo)
-	if err != nil {
-		return nil, err
-	}
-	hi, err := d.rd.DecodeFreqByte(d.ft, freq.SVCTEntBeamEntityHi)
-	if err != nil {
-		return nil, err
-	}
-
-	entity := d.lastEntity ^ uint16(lo) ^ uint16(hi)<<8
-	d.lastEntity = entity
-	return appendUint16LE(out, entity), nil
 }
 
 func (d *packetDecoder) decodeFixedOperation(
@@ -99,13 +84,13 @@ func (d *packetDecoder) decodeFixedOperation(
 	return out, nil
 }
 
-func (d *packetDecoder) appendFreqBytes(
+func (d *packetDecoder) decodeRepeatedRow(
 	out []byte,
-	freqTableAddr uint32,
+	row uint32,
 	count int,
 ) ([]byte, error) {
 	for range count {
-		b, err := d.rd.DecodeFreqByte(d.ft, freqTableAddr)
+		b, err := d.rd.DecodeFreqByte(d.ft, row)
 		if err != nil {
 			return nil, err
 		}

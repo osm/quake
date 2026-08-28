@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/osm/quake/protocol"
+	"github.com/osm/quake/qizmo/internal/wire"
 	"github.com/osm/quake/qizmo/state"
 )
 
@@ -57,10 +58,10 @@ func TestTrackerTracksCompletePlayerWireLayout(t *testing.T) {
 		t.Fatalf("current player count = %d, want 1", len(st.CurrentPlayers))
 	}
 	record := state.PlayerRecordBytesLE(st.CurrentPlayers[0])
-	if got := record[11]; got != 3 {
+	if got := record[wire.PlayerIndexOffset]; got != 3 {
 		t.Fatalf("player = %#x, want 0x03", got)
 	}
-	if got := record[46]; got != 0x44 {
+	if got := record[wire.PlayerMsecOffset]; got != 0x44 {
 		t.Fatalf("msec = %#x, want 0x44", got)
 	}
 	for _, check := range []struct {
@@ -68,14 +69,14 @@ func TestTrackerTracksCompletePlayerWireLayout(t *testing.T) {
 		off  int
 		want uint16
 	}{
-		{"angle 1", 14, 0x1111},
-		{"angle 2", 12, 0x2222},
-		{"forward", 20, 0x4444},
-		{"side", 22, 0x5555},
-		{"up", 18, 0x6666},
-		{"velocity 1", 28, 0xaaaa},
-		{"velocity 2", 30, 0xbbbb},
-		{"velocity 3", 32, 0xcccc},
+		{"angle 1", wire.PlayerAngleOffset + 2, 0x1111},
+		{"angle 2", wire.PlayerAngleOffset, 0x2222},
+		{"forward", wire.PlayerMoveOffset, 0x4444},
+		{"side", wire.PlayerMoveOffset + 2, 0x5555},
+		{"up", wire.PlayerRollOffset, 0x6666},
+		{"velocity 1", wire.PlayerVelocityOffset, 0xaaaa},
+		{"velocity 2", wire.PlayerVelocityOffset + 2, 0xbbbb},
+		{"velocity 3", wire.PlayerVelocityOffset + 4, 0xcccc},
 	} {
 		if got := state.PlayerRecordUint16(&record, check.off); got != check.want {
 			t.Fatalf("%s = %#x, want %#x", check.name, got, check.want)
@@ -86,19 +87,19 @@ func TestTrackerTracksCompletePlayerWireLayout(t *testing.T) {
 		off  int
 		want byte
 	}{
-		{"buttons", 17, 0x77},
-		{"impulse", 16, 0x88},
-		{"command msec", 24, 0x99},
-		{"model", 25, 4},
-		{"skin number", 26, 5},
-		{"effects", 27, 6},
-		{"weapon frame", 34, 7},
+		{"buttons", wire.PlayerButtonsOffset, 0x77},
+		{"impulse", wire.PlayerImpulseOffset, 0x88},
+		{"command msec", wire.PlayerCommandMsecOffset, 0x99},
+		{"model", wire.PlayerModelOffset, 4},
+		{"skin number", wire.PlayerSkinNumOffset, 5},
+		{"effects", wire.PlayerEffectsOffset, 6},
+		{"weapon frame", wire.PlayerWeaponFrameOffset, 7},
 	} {
 		if got := record[check.off]; got != check.want {
 			t.Fatalf("%s = %#x, want %#x", check.name, got, check.want)
 		}
 	}
-	if record[3]&0x80 == 0 {
+	if record[wire.PlayerMotionMaskOffset]&wire.PlayerDead == 0 {
 		t.Fatal("dead flag was not retained")
 	}
 }

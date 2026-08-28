@@ -178,11 +178,11 @@ func (d *packetDecoder) decodeSVCSetInfo(out []byte) ([]byte, error) {
 func (d *packetDecoder) decodeSVCUpdateUserInfo(out []byte) ([]byte, error) {
 	payloadStart := len(out)
 	var err error
-	out, err = d.appendFreqBytes(out, freq.SVCPlayerIndex, 1)
+	out, err = d.decodeRepeatedRow(out, freq.SVCPlayerIndex, 1)
 	if err != nil {
 		return nil, err
 	}
-	out, err = d.appendFreqBytes(out, freq.SVCUpdateUserInfoUserID, 4)
+	out, err = d.decodeRepeatedRow(out, freq.SVCUpdateUserInfoUserID, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (d *packetDecoder) decodeSVCUpdateUserInfo(out []byte) ([]byte, error) {
 
 func (d *packetDecoder) decodeSVCLightStyle(out []byte) ([]byte, error) {
 	var err error
-	out, err = d.appendFreqBytes(out, freq.ByteValue, 1)
+	out, err = d.decodeRepeatedRow(out, freq.ByteValue, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -214,12 +214,12 @@ func (d *packetDecoder) decodeSVCServerInfo(out []byte) ([]byte, error) {
 
 func (d *packetDecoder) decodeString(
 	out []byte,
-	freqTableAddr uint32,
+	row uint32,
 ) ([]byte, error) {
 	rd := d.rd
 	ft := d.ft
 	for {
-		b, err := rd.DecodeFreqByte(ft, freqTableAddr)
+		b, err := rd.DecodeFreqByte(ft, row)
 		if err != nil {
 			return nil, err
 		}

@@ -1,6 +1,17 @@
 package message
 
-import "github.com/osm/quake/qizmo/state"
+import (
+	"encoding/binary"
+
+	"github.com/osm/quake/qizmo/state"
+)
+
+func readCoordinateTriplet(data []byte) (coordinates [3]int16) {
+	for axis := range coordinates {
+		coordinates[axis] = int16(binary.LittleEndian.Uint16(data[axis*2:]))
+	}
+	return coordinates
+}
 
 func playerCoordinates(
 	players []state.PlayerRecord,
@@ -8,11 +19,7 @@ func playerCoordinates(
 ) ([3]uint16, bool) {
 	for i := range players {
 		if state.PlayerIndex(players[i]) == byte(entity-1) {
-			return [3]uint16{
-				uint16(players[i][1]),
-				uint16(players[i][1] >> 16),
-				uint16(players[i][2]),
-			}, true
+			return state.PlayerOrigin(players[i]), true
 		}
 	}
 

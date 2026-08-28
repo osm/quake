@@ -1,10 +1,12 @@
 package qwz_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -56,13 +58,57 @@ var fixtureChecksums = map[string]string{
 	"demo38": "3d723aa0749a13fed49aa361750b74d9c7eb3759bd996d1f7cac642aa58afc96",
 }
 
+// encodeChecksums were produced by running each fixture through a fresh
+// original Qizmo process (-D, followed by -C in another fresh process).
+// demo36 is absent because the original compressor terminates without output.
+var encodeChecksums = map[string]string{
+	"demo00": "4a922f2dcc8d127e77583a8138495a02a71cbf44a5a65196af58d32bbacb1a91",
+	"demo01": "e6e3a4cc57e42a9ec4d0a5d05cdb381dd469b209498b45575c03aec572425a70",
+	"demo02": "5364fbe43ec2a5295a1673de89b641277255d61302c92d366d34235938366fca",
+	"demo03": "1e3b9561d50ee9b1a15dba4a3a5c59e006393317626838e9d4d8c224c9efa1db",
+	"demo04": "0b48d9b9d8a99a0c5a0f5c0f75f325d26f10b64f08f6cec121696e8f81ce0dbf",
+	"demo05": "559a1aed03f8c65b97af6594a4f3aafeb9d3b6a409ff10e9214057c403a2ab4e",
+	"demo06": "d93c51ca9e24c6d67911329dcfe20901f6ee0111ec02f4d86b5d7a4041ebc42e",
+	"demo07": "59ac00b2b27c5c47e9ea8f31814a528b947a6ecd16e3253736bcf7cd37d92a7d",
+	"demo08": "18aa7acf8f04aecd17b8dee2c081bbbd54b10b9f4cde48e1309d472538e59d20",
+	"demo09": "423dc2297dd8a49d20312771dc0520087ba947fe92c8f4353ee69a6c8e814a5a",
+	"demo10": "57e13bcc3954048db6ff4896871da24d6b9bc8b34c44d87b6734a14711592beb",
+	"demo11": "88dc47d6b8396f5721490d2a1fc116d9f5ad3a22d0818b3db89126818e5f79a9",
+	"demo12": "fdda3451d106b47ad175fcecc2fa902c6d3f76130e812def761ca858278a8265",
+	"demo13": "3f80a911557d5955811986aaa843228c28e3e221c3a3b43658acb4f57d9fad9b",
+	"demo14": "2ac0e7fd19ebbb277988393baccd65714180ea80886afde3ffda9d14e56235f8",
+	"demo15": "7820058f456925da0a3bed6a349677c1f5092675a10b06c2cb2d54e106eb9898",
+	"demo16": "e3895fce36fc8b85f31664aadba7cd7c6ab665f54509a828d15c582208097863",
+	"demo17": "1efd06c460cc1e3f95d2160d146f7a9ef4abfb3a83aa028ecfbae9b170d4b670",
+	"demo18": "74a0b09a510c2cb6a6fe1b68c5dbd6b2c3af95ec271d28b322d2cf29838e342f",
+	"demo19": "fbe403ea883387ede8ef4f7ab1911b440fd430405f6d76348f240d005ac719bf",
+	"demo20": "9a809a34613e4f55097b7fc7fa33325e27af0694fc0a2697bc111a1489131aeb",
+	"demo21": "786967717938e02a0197668a5a62b3884e5b36f0e2c58d6ee13b320a92d57b10",
+	"demo22": "bfe339b1e347fcbb2a76c4dd223bb71150ff20a1834a1d71c9b580c8089aab8a",
+	"demo23": "890a33b03c5bc9be2e332479c0dd476373a0f59e2f66bbddb1506dc3a6399303",
+	"demo24": "35385e5c888dff91553f3e665d69101ba6bc381b1d191efb0aacbfbd96f2fed0",
+	"demo25": "eeb8995fe1a43ea13b623979cd5f1f8489c1b4974f22314b1ac252581100e8dd",
+	"demo26": "671deeced563977e896938cee23c4bb4545ffa06a0a07b98564c95bb4798d74c",
+	"demo27": "368d78bd054fa62ed45e32eb390c5545a48eacf9602eeb385a15e88e59dc8370",
+	"demo28": "7cd730ecce9541ac1199b55cbe08c6ff09fa75f1bb7e77176a39f9154355b1d7",
+	"demo29": "fff791964e267c957adaa45ea7f348430399281a1a05a8772a3008b1b3706538",
+	"demo30": "3021173c2987c932e7f59c9834df58e106419ef6b263e19aa6d67526e6de3981",
+	"demo31": "d5b298c3548c3ff5d5c471c67539979512d0c1d23e8e8e534b2bdff0f834e43a",
+	"demo32": "aef8764fa09d42c39338390c578084b545bbbc1eb7e341a3a4d16c58722f965f",
+	"demo33": "7820058f456925da0a3bed6a349677c1f5092675a10b06c2cb2d54e106eb9898",
+	"demo34": "0f38c93da484da8261d438bd4eb3523814037f84c6251690e4910bacac9d25ef",
+	"demo35": "b6dd1e7c0b274f193cb0332d20a78b8fba01e99af47c3b25c8dce4d9cb5de835",
+	"demo37": "d92c150140933e5a1de9a226c3a0b3519dcf6d11fcb83a7630a6fd96e2506da6",
+	"demo38": "da1719b4b761f4e50e9064753870b7e7c4806fe56c9e03695dd6195403396d95",
+}
+
 func TestDecodeFixtures(t *testing.T) {
 	ft, err := freq.NewTables(freq.DefaultCompressDat)
 	if err != nil {
 		t.Fatalf("new freq tables: %v", err)
 	}
 
-	da := assets.Embedded()
+	packetAssets := assets.Embedded()
 
 	qwzPaths, err := filepath.Glob(filepath.Join("testdata", "*.qwz"))
 	if err != nil {
@@ -88,7 +134,7 @@ func TestDecodeFixtures(t *testing.T) {
 				t.Fatalf("read %s: %v", qwzPath, err)
 			}
 
-			got, err := qwz.Decode(qwzData, ft, da)
+			got, err := qwz.Decode(qwzData, ft, packetAssets)
 			if err != nil {
 				t.Fatalf("decode %s: %v", qwzPath, err)
 			}
@@ -97,11 +143,38 @@ func TestDecodeFixtures(t *testing.T) {
 			if gotChecksum != wantChecksum {
 				t.Fatalf("decoded checksum mismatch: got %s want %s", gotChecksum, wantChecksum)
 			}
+
+			encoded, encodeErr := qwz.Encode(got, ft)
+			if name == "demo36" {
+				if encodeErr == nil {
+					t.Fatal("Qizmo's zero-length DEMO_READ was accepted")
+				}
+			} else if encodeErr != nil {
+				t.Fatalf("encode decoded QWD: %v", encodeErr)
+			} else if wantEncodeChecksum, ok := encodeChecksums[name]; ok {
+				if gotChecksum := checksum(encoded); gotChecksum != wantEncodeChecksum {
+					t.Fatalf("Qizmo checksum mismatch: got %s want %s", gotChecksum, wantEncodeChecksum)
+				}
+				// This fixture is stable through Qizmo's decode/encode cycle, so it
+				// also compares the complete archive directly.
+				if name == "demo01" && !bytes.Equal(encoded, qwzData) {
+					t.Fatalf("QWZ mismatch: got %d bytes, want %d", len(encoded), len(qwzData))
+				}
+			} else {
+				t.Fatalf("missing Qizmo checksum fixture for %s", name)
+			}
+			// These integration fixtures are large enough that retaining several
+			// generations before the next automatic collection can exhaust small
+			// CI workers.
+			runtime.GC()
 		})
 	}
 
 	if len(fixtureChecksums) != len(qwzPaths) {
 		t.Fatalf("checksum fixture count mismatch: got %d want %d", len(fixtureChecksums), len(qwzPaths))
+	}
+	if len(encodeChecksums) != len(qwzPaths)-1 {
+		t.Fatalf("encode checksum fixture count mismatch: got %d want %d", len(encodeChecksums), len(qwzPaths)-1)
 	}
 }
 

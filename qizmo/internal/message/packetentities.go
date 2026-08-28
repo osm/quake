@@ -9,7 +9,9 @@ import (
 )
 
 func entityWireEqual(a, b state.EntityRecord) bool {
-	return state.EntityNumber(a) == state.EntityNumber(b) && bytes.Equal(a[4:18], b[4:18])
+	visibleA := a[wire.EntityVisibleStateOffset:wire.EntityVisibleStateEnd]
+	visibleB := b[wire.EntityVisibleStateOffset:wire.EntityVisibleStateEnd]
+	return state.EntityNumber(a) == state.EntityNumber(b) && bytes.Equal(visibleA, visibleB)
 }
 
 func serializeSVCPacketEntitiesFull(

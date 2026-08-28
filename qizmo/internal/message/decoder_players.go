@@ -6,31 +6,32 @@ import (
 
 	"github.com/osm/quake/protocol"
 	"github.com/osm/quake/qizmo/freq"
+	"github.com/osm/quake/qizmo/internal/wire"
 	"github.com/osm/quake/qizmo/packed"
 	"github.com/osm/quake/qizmo/rangedec"
 	"github.com/osm/quake/qizmo/state"
 )
 
-func addPlayerRecordInt16(record *[48]byte, offset int, delta int16) {
+func addPlayerRecordInt16(record *state.PlayerRecordBytes, offset int, delta int16) {
 	value := int16(state.PlayerRecordUint16(record, offset)) + delta
 	state.SetPlayerRecordUint16(record, offset, uint16(value))
 }
 
-func addPlayerRecordByteDelta(record *[48]byte, offset int, delta byte) {
+func addPlayerRecordByteDelta(record *state.PlayerRecordBytes, offset int, delta byte) {
 	record[offset] = byte(int(record[offset]) + int(int8(delta)))
 }
 
 func decodePlayerInfoMaskDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
-	recBytes *[48]byte,
+	record *state.PlayerRecordBytes,
 ) error {
 	for maskOffset, row := range playerMaskDeltaRows {
 		value, err := rd.DecodeFreqByte(ft, row)
 		if err != nil {
 			return err
 		}
-		recBytes[maskOffset] ^= value
+		record[maskOffset] ^= value
 	}
 
 	return nil
@@ -39,26 +40,26 @@ func decodePlayerInfoMaskDeltas(
 func decodePlayerInfoOriginDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
-	recBytes *[48]byte,
+	record *state.PlayerRecordBytes,
 ) error {
-	originMask := recBytes[0]
+	originMask := record[wire.PlayerOriginMaskOffset]
 	for axis, rows := range playerOriginDeltaRows {
 		lowMask := uint16(1 << uint(axis*2))
 		delta, err := decodeMaskedWordDelta(rd, ft, uint16(originMask), lowMask, lowMask<<1, rows)
 		if err != nil {
 			return err
 		}
-		addPlayerRecordInt16(recBytes, 4+axis*2, delta)
+		addPlayerRecordInt16(record, wire.PlayerOriginOffset+axis*2, delta)
 	}
-	if originMask&0x40 != 0 {
+	if originMask&wire.PlayerFrameDelta != 0 {
 		value, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoFrameDelta)
 		if err != nil {
 			return err
 		}
-		addPlayerRecordByteDelta(recBytes, 10, value)
+		addPlayerRecordByteDelta(record, wire.PlayerFrameOffset, value)
 	}
 
-	recBytes[0] &= 0xbf
+	record[wire.PlayerOriginMaskOffset] &= wire.PlayerOriginHistoryMask
 
 	return nil
 }
@@ -66,10 +67,10 @@ func decodePlayerInfoOriginDeltas(
 func decodePlayerInfoAngleDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
-	recBytes *[48]byte,
+	record *state.PlayerRecordBytes,
 ) error {
-	angleMoveMask := recBytes[1]
-	accAngle := binary.LittleEndian.Uint32(recBytes[36:40])
+	angleMoveMask := record[wire.PlayerAngleMoveMaskOffset]
+	accumulator := binary.LittleEndian.Uint32(record[wire.PlayerAngleAccumulatorOffset:])
 	for field, rows := range playerAngleMoveDeltaRows {
 		lowMask := uint16(1 << uint(field*2))
 		delta, err := decodeMaskedWordDelta(rd, ft, uint16(angleMoveMask), lowMask, lowMask<<1, rows)
@@ -78,17 +79,17 @@ func decodePlayerInfoAngleDeltas(
 		}
 		switch field {
 		case 0:
-			accAngle = packed.AddLow16(accAngle, delta)
-			addPlayerRecordInt16(recBytes, 12, int16(uint16(accAngle)))
+			accumulator = packed.AddLow16(accumulator, delta)
+			addPlayerRecordInt16(record, wire.PlayerAngleOffset, int16(uint16(accumulator)))
 		case 1:
-			accAngle = packed.AddHigh16(accAngle, delta)
-			addPlayerRecordInt16(recBytes, 14, int16(uint16(accAngle>>16)))
+			accumulator = packed.AddHigh16(accumulator, delta)
+			addPlayerRecordInt16(record, wire.PlayerAngleOffset+2, int16(uint16(accumulator>>16)))
 		default:
-			addPlayerRecordInt16(recBytes, 20+(field-2)*2, delta)
+			addPlayerRecordInt16(record, wire.PlayerMoveOffset+(field-2)*2, delta)
 		}
 	}
 
-	binary.LittleEndian.PutUint32(recBytes[36:40], accAngle)
+	binary.LittleEndian.PutUint32(record[wire.PlayerAngleAccumulatorOffset:], accumulator)
 
 	return nil
 }
@@ -97,59 +98,66 @@ func decodePlayerInfoStateDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
 	st *state.Packet,
-	recBytes *[48]byte,
+	record *state.PlayerRecordBytes,
 ) error {
-	stateMask := recBytes[2]
+	stateMask := record[wire.PlayerStateMaskOffset]
 
-	rollDelta, err := decodeMaskedWordDelta(rd, ft, uint16(stateMask), 0x01, 0x02, playerRollDeltaRows)
+	rollDelta, err := decodeMaskedWordDelta(
+		rd,
+		ft,
+		uint16(stateMask),
+		wire.PlayerRollDeltaLo,
+		wire.PlayerRollDeltaHi,
+		playerRollDeltaRows,
+	)
 	if err != nil {
 		return err
 	}
-	addPlayerRecordInt16(recBytes, 18, rollDelta)
-	if stateMask&0x04 != 0 {
+	addPlayerRecordInt16(record, wire.PlayerRollOffset, rollDelta)
+	if stateMask&wire.PlayerButtonsXOR != 0 {
 		value, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoButtonsXOR)
 		if err != nil {
 			return err
 		}
-		recBytes[17] ^= value
+		record[wire.PlayerButtonsOffset] ^= value
 	}
-	if stateMask&0x08 != 0 {
+	if stateMask&wire.PlayerImpulseSet != 0 {
 		value, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoImpulseSet)
 		if err != nil {
 			return err
 		}
-		recBytes[16] = value
+		record[wire.PlayerImpulseOffset] = value
 	}
-	if stateMask&0x10 != 0 {
+	if stateMask&wire.PlayerCommandMsecDelta != 0 {
 		value, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoCommandMsecDelta)
 		if err != nil {
 			return err
 		}
-		addPlayerRecordByteDelta(recBytes, 24, value)
+		addPlayerRecordByteDelta(record, wire.PlayerCommandMsecOffset, value)
 	}
-	if stateMask&0x20 != 0 {
+	if stateMask&wire.PlayerModelRemap != 0 {
 		remapIndex, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoModelRemapIndex)
 		if err != nil {
 			return err
 		}
-		recBytes[25] = st.ModelForRemapIndex(remapIndex)
+		record[wire.PlayerModelOffset] = st.ModelForRemapIndex(remapIndex)
 	}
-	if stateMask&0x40 != 0 {
+	if stateMask&wire.PlayerSkinNumSet != 0 {
 		value, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoSkinNumSet)
 		if err != nil {
 			return err
 		}
-		recBytes[26] = value
+		record[wire.PlayerSkinNumOffset] = value
 	}
-	if int8(stateMask) < 0 {
+	if stateMask&wire.PlayerEffectsXOR != 0 {
 		value, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoEffectsXOR)
 		if err != nil {
 			return err
 		}
-		recBytes[27] ^= value
+		record[wire.PlayerEffectsOffset] ^= value
 	}
 
-	recBytes[2] &= 0x97
+	record[wire.PlayerStateMaskOffset] &= wire.PlayerStateHistoryMask
 
 	return nil
 }
@@ -157,11 +165,11 @@ func decodePlayerInfoStateDeltas(
 func decodePlayerInfoVelocityDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
-	recBytes *[48]byte,
+	record *state.PlayerRecordBytes,
 ) error {
-	velocityMask := recBytes[3]
-	accumulatorXY := binary.LittleEndian.Uint32(recBytes[40:44])
-	accumulatorZ := binary.LittleEndian.Uint32(recBytes[44:48])
+	velocityMask := record[wire.PlayerMotionMaskOffset]
+	accumulatorXY := binary.LittleEndian.Uint32(record[wire.PlayerVelocityAccumulatorOffset:])
+	accumulatorZ := binary.LittleEndian.Uint32(record[wire.PlayerVelocityAccumulatorOffset+4:])
 	for axis, rows := range playerVelocityDeltaRows {
 		lowMask := uint16(1 << uint(axis*2))
 		delta, err := decodeMaskedWordDelta(rd, ft, uint16(velocityMask), lowMask, lowMask<<1, rows)
@@ -171,37 +179,37 @@ func decodePlayerInfoVelocityDeltas(
 		switch axis {
 		case 0:
 			accumulatorXY = packed.AddLow16(accumulatorXY, delta)
-			addPlayerRecordInt16(recBytes, 28, int16(uint16(accumulatorXY)))
+			addPlayerRecordInt16(record, wire.PlayerVelocityOffset, int16(uint16(accumulatorXY)))
 		case 1:
 			accumulatorXY = packed.AddHigh16(accumulatorXY, delta)
-			addPlayerRecordInt16(recBytes, 30, int16(uint16(accumulatorXY>>16)))
+			addPlayerRecordInt16(record, wire.PlayerVelocityOffset+2, int16(uint16(accumulatorXY>>16)))
 		case 2:
 			accumulatorZ = packed.AddLow16(accumulatorZ, delta)
-			addPlayerRecordInt16(recBytes, 32, int16(uint16(accumulatorZ)))
+			addPlayerRecordInt16(record, wire.PlayerVelocityOffset+4, int16(uint16(accumulatorZ)))
 		}
 	}
 
-	if velocityMask&0x40 != 0 {
+	if velocityMask&wire.PlayerWeaponFrameDelta != 0 {
 		value, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoWeaponFrameDelta)
 		if err != nil {
 			return err
 		}
-		addPlayerRecordByteDelta(recBytes, 34, value)
+		addPlayerRecordByteDelta(record, wire.PlayerWeaponFrameOffset, value)
 	}
 
-	recBytes[3] &= 0xbf
-	binary.LittleEndian.PutUint32(recBytes[40:44], accumulatorXY)
-	binary.LittleEndian.PutUint32(recBytes[44:48], accumulatorZ)
+	record[wire.PlayerMotionMaskOffset] &= wire.PlayerMotionHistoryMask
+	binary.LittleEndian.PutUint32(record[wire.PlayerVelocityAccumulatorOffset:], accumulatorXY)
+	binary.LittleEndian.PutUint32(record[wire.PlayerVelocityAccumulatorOffset+4:], accumulatorZ)
 
 	return nil
 }
 
-func buildDecodedPlayerInfoFlags(recBytes *[48]byte, playerModelIndex byte) (uint16, byte) {
-	flags, commandFlags := buildPlayerInfoFlags(recBytes, playerModelIndex)
+func buildDecodedPlayerInfoFlags(record *state.PlayerRecordBytes, playerModelIndex byte) (uint16, byte) {
+	flags, commandFlags := buildPlayerInfoFlags(record, playerModelIndex)
 	// Qizmo tracks buttons in its player history but does not reproduce the
 	// CM_BUTTONS field when reconstructing svc_playerinfo.
 	commandFlags &^= protocol.CMButtons
-	if commandFlags == 0 && recBytes[24] == 0 {
+	if commandFlags == 0 && record[wire.PlayerCommandMsecOffset] == 0 {
 		flags &^= protocol.PFCommand
 	}
 	return flags, commandFlags
@@ -255,28 +263,24 @@ func (d *packetDecoder) decodeSVCPlayerInfoDeltas(out []byte) ([]byte, error) {
 
 		record := state.PlayerRecordBytesLE(baseRecord)
 
-		msec, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoMsec)
+		b, err := rd.DecodeFreqByte(ft, freq.SVCPlayerInfoMsec)
 		if err != nil {
 			return nil, err
 		}
-		record[46] = msec
-		if int8(msec) < 0 {
-			record[46] &= 0x7f
+		record[wire.PlayerMsecOffset] = b
+		if b&wire.PlayerMsecShortcut != 0 {
+			record[wire.PlayerMsecOffset] &^= wire.PlayerMsecShortcut
 		} else {
-			scaleStep := int(baseRecord[6] & 0xff)
-			predictionScale := scaleStep
-			if scaleStep != 0 {
-				target := int(msec) + (packetScale - int(state.PlayerRecordByte(baseRecord, 0x2e)))
-				for predictionScale < target-scaleStep {
-					predictionScale += scaleStep
-				}
+			scale := playerPredictionScale(
+				state.PlayerRecordByte(baseRecord, wire.PlayerCommandMsecOffset),
+				b,
+				state.PlayerRecordByte(baseRecord, wire.PlayerMsecOffset),
+				packetScale,
+			)
+			predictedOrigin := predictedPlayerOrigin(&record, scale)
+			for axis, value := range predictedOrigin {
+				state.SetPlayerRecordUint16(&record, wire.PlayerOriginOffset+axis*2, uint16(value))
 			}
-			velocityX := int16(state.PlayerRecordUint16(&record, 28))
-			velocityY := int16(state.PlayerRecordUint16(&record, 30))
-			velocityZ := int16(state.PlayerRecordUint16(&record, 32))
-			addPlayerRecordInt16(&record, 4, packed.Scaled16(velocityX, predictionScale))
-			addPlayerRecordInt16(&record, 6, packed.Scaled16(velocityY, predictionScale))
-			addPlayerRecordInt16(&record, 8, packed.Scaled16(velocityZ, predictionScale))
 			if err := decodePlayerInfoMaskDeltas(rd, ft, &record); err != nil {
 				return nil, err
 			}
@@ -319,11 +323,11 @@ func (d *packetDecoder) decodeSVCUpdatePing(out []byte) ([]byte, error) {
 	}
 	out = append(out, playerIndex)
 
-	for _, freqTableAddr := range []uint32{
+	for _, row := range []uint32{
 		freq.SVCPlayerInfoPingLo,
 		freq.SVCPlayerInfoPingHi,
 	} {
-		b, err := rd.DecodeFreqByte(ft, freqTableAddr)
+		b, err := rd.DecodeFreqByte(ft, row)
 		if err != nil {
 			return nil, err
 		}

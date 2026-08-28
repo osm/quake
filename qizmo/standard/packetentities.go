@@ -59,9 +59,7 @@ func parsePacketEntityRecords(
 			record = packetState.Baselines[entityNumber]
 			state.SetEntityNumber(&record, entityNumber)
 		}
-		for i := 18; i <= 26; i++ {
-			record[i] = 0
-		}
+		clear(record[wire.EntityOriginCarryOffset:wire.EntityCarryEnd])
 
 		for _, field := range wire.PacketEntityFields {
 			if bits&field.Mask == 0 {
@@ -82,8 +80,7 @@ func parsePacketEntityRecords(
 			state.SetEntityRecordUint16(&record, field.RecordOffset, value)
 		}
 
-		record[2] = byte(bits)
-		record[3] = byte(bits>>8) & 0x3f
+		state.SetEntityMask(&record, bits)
 		entities[entityNumber] = record
 	}
 }

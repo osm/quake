@@ -5,6 +5,7 @@ import (
 
 	"github.com/osm/quake/protocol"
 	"github.com/osm/quake/qizmo/freq"
+	"github.com/osm/quake/qizmo/state"
 )
 
 func (d *Decoder) DecodePacket(
@@ -26,9 +27,9 @@ func (d *Decoder) DecodePacketWithOptions(
 		rd:                  &rd,
 		ft:                  d.ft,
 		state:               d.state,
-		lastPlayerIndex:     0xff,
-		lastPingPlayerIndex: 0xff,
-		lastPLPlayerIndex:   0xff,
+		lastPlayerIndex:     noPlayerIndex,
+		lastPingPlayerIndex: noPlayerIndex,
+		lastPLPlayerIndex:   noPlayerIndex,
 	}
 
 	var out []byte
@@ -52,7 +53,7 @@ func (d *Decoder) DecodePacketWithOptions(
 	hasTrailingSVC := false
 
 	for {
-		svcCode, err := packetDecoder.rd.DecodeFreqByte(
+		opcode, err := packetDecoder.rd.DecodeFreqByte(
 			packetDecoder.ft,
 			freq.SVCType,
 		)
@@ -60,13 +61,13 @@ func (d *Decoder) DecodePacketWithOptions(
 			return nil, err
 		}
 
-		if svcCode == protocol.SVCBad {
+		if opcode == protocol.SVCBad {
 			break
 		}
 
 		hasTrailingSVC = true
-		out = append(out, svcCode)
-		out, err = packetDecoder.decodeTrailingOperation(out, svcCode, options)
+		out = append(out, opcode)
+		out, err = packetDecoder.decodeOperation(out, opcode, options)
 		if err != nil {
 			if errors.Is(err, errDroppedPacket) {
 				*d.stream = rd
@@ -92,18 +93,10 @@ func (d *Decoder) DecodePacketWithOptions(
 func (d *packetDecoder) refreshPacketContext() {
 	if len(d.state.CurrentPlayers) != 0 {
 		lastRec := d.state.CurrentPlayers[len(d.state.CurrentPlayers)-1]
-		d.lastCoordinates = [3]uint16{
-			uint16(lastRec[1]),
-			uint16(lastRec[1] >> 16),
-			uint16(lastRec[2]),
-		}
+		d.lastCoordinates = state.PlayerOrigin(lastRec)
 
 		firstRec := d.state.CurrentPlayers[0]
-		d.primaryCoordinates = [3]uint16{
-			uint16(firstRec[1]),
-			uint16(firstRec[1] >> 16),
-			uint16(firstRec[2]),
-		}
+		d.primaryCoordinates = state.PlayerOrigin(firstRec)
 	}
 
 	if baseSequence, ok := d.state.PacketBase(); ok {

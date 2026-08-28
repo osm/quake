@@ -8,9 +8,16 @@ import (
 const (
 	degreesPerTurn = 360.0
 	unitsPerTurn   = 1 << 16
-	initialImpulse = 8
 
-	PayloadSize = qwd.CmdPayloadSize
+	msecOffset      = 0x00
+	paddingOffset   = 0x01
+	angleOffset     = 0x04
+	movementOffset  = 0x10
+	buttonsOffset   = 0x16
+	impulseOffset   = 0x17
+	angleCopyOffset = 0x18
+	initialImpulse  = 8
+	PayloadSize     = qwd.CmdPayloadSize
 )
 
 func unpackAngle(angle int16) float32 {

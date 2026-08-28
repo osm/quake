@@ -3,6 +3,7 @@ package message
 import (
 	"github.com/osm/quake/protocol"
 	"github.com/osm/quake/qizmo/freq"
+	"github.com/osm/quake/qizmo/internal/wire"
 	"github.com/osm/quake/qizmo/packed"
 	"github.com/osm/quake/qizmo/state"
 )
@@ -96,11 +97,11 @@ func (d *packetDecoder) decodePrimaryPlayerBase() (state.PlayerRecord, int, erro
 }
 
 func (d *packetDecoder) decodePrimaryPlayerOrigin(record *state.PlayerRecord, predictionScale int) error {
-	velocityXY := record[7]
-	velocityZ := record[8]
-	record[1] = packed.AddLow16(record[1], packed.Scaled16(int16(velocityXY), predictionScale))
-	record[1] = packed.AddHigh16(record[1], packed.Scaled16(int16(velocityXY>>16), predictionScale))
-	record[2] = packed.AddLow16(record[2], packed.Scaled16(int16(velocityZ), predictionScale))
+	origin := state.PlayerOrigin(*record)
+	velocity := state.PlayerVelocity(*record)
+	for axis := range origin {
+		origin[axis] += uint16(packed.Scaled16(velocity[axis], predictionScale))
+	}
 
 	originMask := state.PlayerOriginMask(*record)
 	for axis, rows := range playerOriginDeltaRows {
@@ -109,23 +110,17 @@ func (d *packetDecoder) decodePrimaryPlayerOrigin(record *state.PlayerRecord, pr
 		if err != nil {
 			return err
 		}
-		switch axis {
-		case 0:
-			record[1] = packed.AddLow16(record[1], delta)
-		case 1:
-			record[1] = packed.AddHigh16(record[1], delta)
-		case 2:
-			record[2] = packed.AddLow16(record[2], delta)
-		}
+		origin[axis] += uint16(delta)
 	}
-	if originMask&0x40 != 0 {
+	if originMask&wire.PlayerFrameDelta != 0 {
 		delta, err := d.rd.DecodeFreqByte(d.ft, freq.SVCPlayerInfoFrameDelta)
 		if err != nil {
 			return err
 		}
 		state.SetPlayerFrame(record, state.PlayerFrame(*record)+delta)
 	}
-	state.SetPlayerOriginMask(record, originMask&0xbf)
+	state.SetPlayerOrigin(record, origin)
+	state.SetPlayerOriginMask(record, originMask&wire.PlayerOriginHistoryMask)
 	return nil
 }
 
@@ -134,7 +129,7 @@ func (d *packetDecoder) decodePrimaryPlayerState(record *state.PlayerRecord) (by
 	var flags byte
 
 	model := state.PlayerModel(*record)
-	if stateMask&0x20 != 0 {
+	if stateMask&wire.PlayerModelRemap != 0 {
 		index, err := d.rd.DecodeFreqByte(d.ft, freq.SVCPlayerInfoModelRemapIndex)
 		if err != nil {
 			return 0, err
@@ -147,7 +142,7 @@ func (d *packetDecoder) decodePrimaryPlayerState(record *state.PlayerRecord) (by
 	}
 
 	skinNum := state.PlayerSkinNum(*record)
-	if stateMask&0x40 != 0 {
+	if stateMask&wire.PlayerSkinNumSet != 0 {
 		value, err := d.rd.DecodeFreqByte(d.ft, freq.SVCPlayerInfoSkinNumSet)
 		if err != nil {
 			return 0, err
@@ -160,7 +155,7 @@ func (d *packetDecoder) decodePrimaryPlayerState(record *state.PlayerRecord) (by
 	}
 
 	effects := state.PlayerEffects(*record)
-	if stateMask&0x80 != 0 {
+	if stateMask&wire.PlayerEffectsXOR != 0 {
 		value, err := d.rd.DecodeFreqByte(d.ft, freq.SVCPlayerInfoEffectsXOR)
 		if err != nil {
 			return 0, err
@@ -172,16 +167,14 @@ func (d *packetDecoder) decodePrimaryPlayerState(record *state.PlayerRecord) (by
 		flags |= protocol.PFEffects
 	}
 
-	state.SetPlayerStateMask(record, stateMask&0x97)
+	state.SetPlayerStateMask(record, stateMask&wire.PlayerStateHistoryMask)
 	return flags, nil
 }
 
 func (d *packetDecoder) decodePrimaryPlayerMotion(record *state.PlayerRecord) (byte, byte, error) {
 	motionMask := state.PlayerMotionMask(*record)
-	velocityXY := record[7]
-	velocityZ := record[8]
-	accumulatorXY := record[10]
-	accumulatorZ := record[11]
+	velocity := state.PlayerVelocity(*record)
+	accumulator := state.PlayerVelocityAccumulator(*record)
 	var flags byte
 
 	for axis, rows := range playerVelocityDeltaRows {
@@ -190,46 +183,31 @@ func (d *packetDecoder) decodePrimaryPlayerMotion(record *state.PlayerRecord) (b
 		if err != nil {
 			return 0, 0, err
 		}
-		var velocity int16
-		switch axis {
-		case 0:
-			accumulatorXY = packed.AddLow16(accumulatorXY, delta)
-			velocity = int16(velocityXY) + int16(accumulatorXY)
-			velocityXY = packed.SetLow16(velocityXY, velocity)
-		case 1:
-			accumulatorXY = packed.AddHigh16(accumulatorXY, delta)
-			velocity = int16(velocityXY>>16) + int16(accumulatorXY>>16)
-			velocityXY = packed.SetHigh16(velocityXY, velocity)
-		case 2:
-			accumulatorZ = packed.AddLow16(accumulatorZ, delta)
-			velocity = int16(velocityZ) + int16(accumulatorZ)
-			velocityZ = packed.SetLow16(velocityZ, velocity)
-		}
-		if velocity != 0 {
+		accumulator[axis] += delta
+		velocity[axis] += accumulator[axis]
+		if velocity[axis] != 0 {
 			flags |= byte(protocol.PFVelocity1 << axis)
 		}
 	}
-	record[7] = velocityXY
-	record[10] = accumulatorXY
-	record[11] = accumulatorZ
+	state.SetPlayerVelocity(record, velocity)
+	state.SetPlayerVelocityAccumulator(record, accumulator)
 
-	weaponFrame := byte(velocityZ >> 16)
-	if motionMask&0x40 != 0 {
+	weaponFrame := state.PlayerWeaponFrame(*record)
+	if motionMask&wire.PlayerWeaponFrameDelta != 0 {
 		delta, err := d.rd.DecodeFreqByte(d.ft, freq.SVCPlayerInfoWeaponFrameDelta)
 		if err != nil {
 			return 0, 0, err
 		}
 		weaponFrame += delta
-		velocityZ = velocityZ&^0x00ff0000 | uint32(weaponFrame)<<16
+		state.SetPlayerWeaponFrame(record, weaponFrame)
 	}
-	record[8] = velocityZ
-	state.SetPlayerMotionMask(record, motionMask&0xbf)
+	state.SetPlayerMotionMask(record, motionMask&wire.PlayerMotionHistoryMask)
 
 	var flagsHigh byte
 	if weaponFrame != 0 {
 		flagsHigh |= primaryWeaponFrameFlag
 	}
-	if motionMask&0x80 != 0 {
+	if motionMask&wire.PlayerDead != 0 {
 		flagsHigh |= primaryDeadFlag
 	}
 	return flags, flagsHigh, nil
@@ -243,17 +221,20 @@ func appendPrimaryPlayer(
 	record state.PlayerRecord,
 ) []byte {
 	out = append(out, player, flagsLow, flagsHigh)
-	out = appendUint32LE(out, record[1])
-	out = append(out, byte(record[2]), byte(record[2]>>8), byte(record[2]>>16))
+	for _, value := range state.PlayerOrigin(record) {
+		out = appendUint16LE(out, value)
+	}
+	out = append(out, state.PlayerFrame(record))
 
+	velocity := state.PlayerVelocity(record)
 	if flagsLow&protocol.PFVelocity1 != 0 {
-		out = appendUint16LE(out, uint16(record[7]))
+		out = appendUint16LE(out, uint16(velocity[0]))
 	}
 	if flagsLow&protocol.PFVelocity2 != 0 {
-		out = appendUint16LE(out, uint16(record[7]>>16))
+		out = appendUint16LE(out, uint16(velocity[1]))
 	}
 	if flagsLow&protocol.PFVelocity3 != 0 {
-		out = appendUint16LE(out, uint16(record[8]))
+		out = appendUint16LE(out, uint16(velocity[2]))
 	}
 	if flagsLow&protocol.PFModel != 0 {
 		out = append(out, state.PlayerModel(record))

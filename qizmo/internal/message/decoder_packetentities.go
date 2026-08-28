@@ -4,22 +4,21 @@ import (
 	"fmt"
 
 	"github.com/osm/quake/qizmo/freq"
+	"github.com/osm/quake/qizmo/internal/wire"
 	"github.com/osm/quake/qizmo/rangedec"
 	"github.com/osm/quake/qizmo/state"
 )
 
-const entityOriginCarryOffset = 18
-
-func addEntityByteDelta(rec *state.EntityRecord, field int, value byte) {
-	next := int8(state.EntityRecordByte(*rec, field)) + int8(value)
-	state.SetEntityRecordByte(rec, field, byte(next))
+func addEntityByteDelta(record *state.EntityRecord, field int, value byte) {
+	next := int8(state.EntityRecordByte(*record, field)) + int8(value)
+	state.SetEntityRecordByte(record, field, byte(next))
 }
 
 func decodeNewEntityFieldDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
 	st *state.Packet,
-	rec *state.EntityRecord,
+	record *state.EntityRecord,
 	mask uint16,
 ) error {
 	for _, field := range packetEntityFields {
@@ -32,36 +31,35 @@ func decodeNewEntityFieldDeltas(
 		}
 		switch field.kind {
 		case packetEntityFieldModel:
-			state.SetEntityRecordByte(rec, field.offset, st.ModelForRemapIndex(value))
+			state.SetEntityRecordByte(record, field.offset, st.ModelForRemapIndex(value))
 		case packetEntityFieldXOR:
 			state.SetEntityRecordByte(
-				rec,
+				record,
 				field.offset,
-				state.EntityRecordByte(*rec, field.offset)^value,
+				state.EntityRecordByte(*record, field.offset)^value,
 			)
 		default:
-			addEntityByteDelta(rec, field.offset, value)
+			addEntityByteDelta(record, field.offset, value)
 		}
 	}
 
 	return nil
 }
 
-func decodeEntityPositionDeltas(
+func decodeEntityOriginDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
-	rec *state.EntityRecord,
+	record *state.EntityRecord,
 	mask uint16,
-	xOff, yOff, zOff int,
+	offset int,
 ) error {
-	offsets := [3]int{xOff, yOff, zOff}
-	for axis, rows := range packetEntityPositionDeltaRows {
+	for axis, rows := range packetEntityOriginDeltaRows {
 		lowMask := uint16(1 << uint(8+axis*2))
 		delta, err := decodeMaskedWordDelta(rd, ft, mask, lowMask, lowMask<<1, rows)
 		if err != nil {
 			return err
 		}
-		state.AddEntityRecordInt16(rec, offsets[axis], delta)
+		state.AddEntityRecordInt16(record, offset+axis*2, delta)
 	}
 
 	return nil
@@ -71,22 +69,21 @@ func decodeDeltaEntityFieldDeltas(
 	rd *rangedec.Decoder,
 	ft *freq.Tables,
 	st *state.Packet,
-	rec *state.EntityRecord,
+	record *state.EntityRecord,
 	mask uint16,
 ) error {
-	// Bytes 24..26 carry the hidden running deltas that feed wire fields 9..11.
 	for _, field := range packetEntityFields {
 		present := mask&uint16(field.mask) != 0
-		if field.offset >= 9 {
-			carryOffset := field.offset + 15
+		if field.offset >= wire.EntityAngleOffset {
+			carryOffset := wire.EntityAngleCarryOffset + field.offset - wire.EntityAngleOffset
 			if present {
 				value, err := rd.DecodeFreqByte(ft, field.row)
 				if err != nil {
 					return err
 				}
-				addEntityByteDelta(rec, carryOffset, value)
+				addEntityByteDelta(record, carryOffset, value)
 			}
-			addEntityByteDelta(rec, field.offset, state.EntityRecordByte(*rec, carryOffset))
+			addEntityByteDelta(record, field.offset, state.EntityRecordByte(*record, carryOffset))
 			continue
 		}
 		if !present {
@@ -98,15 +95,15 @@ func decodeDeltaEntityFieldDeltas(
 		}
 		switch field.kind {
 		case packetEntityFieldModel:
-			state.SetEntityRecordByte(rec, field.offset, st.ModelForRemapIndex(value))
+			state.SetEntityRecordByte(record, field.offset, st.ModelForRemapIndex(value))
 		case packetEntityFieldXOR:
 			state.SetEntityRecordByte(
-				rec,
+				record,
 				field.offset,
-				state.EntityRecordByte(*rec, field.offset)^value,
+				state.EntityRecordByte(*record, field.offset)^value,
 			)
 		default:
-			addEntityByteDelta(rec, field.offset, value)
+			addEntityByteDelta(record, field.offset, value)
 		}
 	}
 
@@ -119,11 +116,11 @@ func decodeRunLength(
 	sym byte,
 ) (int, error) {
 	run := int(sym)
-	if sym&0x40 == 0 {
+	if sym&packetEntityPayloadFlag == 0 {
 		return run, nil
 	}
 
-	run = int(sym & 0x1f)
+	run = int(sym & packetEntityRunMask)
 	if run != 0 {
 		return run, nil
 	}
@@ -133,7 +130,7 @@ func decodeRunLength(
 		return 0, err
 	}
 
-	return int(value) + 0x20, nil
+	return int(value) + packetEntityRunExtensionBase, nil
 }
 
 type packetEntityStream struct {
@@ -159,7 +156,7 @@ func (d *packetDecoder) decodeSVCPacketEntities(preserveDelta bool) ([]byte, err
 		state:         d.state,
 		base:          baseEntities,
 		baseSequence:  baseSequence,
-		currentNumber: 0x20,
+		currentNumber: maxPlayers,
 	}
 
 	for {
@@ -170,7 +167,7 @@ func (d *packetDecoder) decodeSVCPacketEntities(preserveDelta bool) ([]byte, err
 		if symbol == 0 {
 			break
 		}
-		if symbol&0x80 != 0 {
+		if symbol&packetEntityNewFlag != 0 {
 			err = stream.decodeNewEntity(symbol)
 		} else {
 			err = stream.decodeBaseEntity(symbol)
@@ -181,23 +178,23 @@ func (d *packetDecoder) decodeSVCPacketEntities(preserveDelta bool) ([]byte, err
 	}
 
 	stream.appendRemainingBase()
-	return d.commitPacketEntities(baseEntities, stream.entities, preserveDelta)
+	return d.finishPacketEntities(baseEntities, stream.entities, preserveDelta)
 }
 
 func (s *packetEntityStream) decodeNewEntity(symbol byte) error {
-	delta := uint16(symbol & 0x3f)
+	delta := uint16(symbol & packetEntityNumberDeltaMask)
 	if delta == 0 {
-		s.currentNumber += 0x40
+		s.currentNumber += packetEntityNumberExtensionBase
 		for {
 			value, err := s.rd.DecodeFreqByte(s.ft, freq.SVCPacketEntityNumDeltaExt)
 			if err != nil {
 				return err
 			}
-			if value != 0xff {
+			if value != packetEntityExtensionChunk {
 				delta = uint16(value)
 				break
 			}
-			s.currentNumber += 0xff
+			s.currentNumber += packetEntityExtensionChunk
 		}
 	}
 	s.currentNumber += delta
@@ -212,18 +209,15 @@ func (s *packetEntityStream) decodeNewEntity(symbol byte) error {
 
 	record := entityBaseline(s.state, s.currentNumber)
 	state.SetEntityNumber(&record, s.currentNumber)
-	// Reset coordinate-delta carry for a new entity.
-	for offset := 18; offset <= 26; offset++ {
-		record[offset] = 0
-	}
+	clear(record[wire.EntityOriginCarryOffset:wire.EntityCarryEnd])
 
-	if symbol&0x40 != 0 {
+	if symbol&packetEntityPayloadFlag != 0 {
 		highMask, err := s.rd.DecodeFreqByte(s.ft, freq.SVCPacketEntityMaskHiXOR)
 		if err != nil {
 			return err
 		}
 		mask := uint16(highMask) << 8
-		if mask&0x4000 != 0 {
+		if packetEntityHasLowMask(mask) {
 			lowMask, err := s.rd.DecodeFreqByte(s.ft, freq.SVCPacketEntityMaskLoXOR)
 			if err != nil {
 				return err
@@ -233,13 +227,12 @@ func (s *packetEntityStream) decodeNewEntity(symbol byte) error {
 				return err
 			}
 		}
-		if err := decodeEntityPositionDeltas(s.rd, s.ft, &record, mask, 12, 14, 16); err != nil {
+		if err := decodeEntityOriginDeltas(s.rd, s.ft, &record, mask, wire.EntityOriginOffset); err != nil {
 			return err
 		}
 	}
 
-	record[2] = 0
-	record[3] = 0
+	state.SetEntityMask(&record, 0)
 	s.entities = append(s.entities, record)
 	return nil
 }
@@ -278,22 +271,22 @@ func (s *packetEntityStream) decodeBaseEntity(symbol byte) error {
 	}
 
 	s.currentNumber = state.EntityNumber(s.base[s.baseIndex])
-	if symbol&0x40 == 0 {
+	if symbol&packetEntityPayloadFlag == 0 {
 		s.baseIndex++
 		return nil
 	}
 
 	record := s.base[s.baseIndex]
 	s.baseIndex++
-	mask := uint16(record[2]) | uint16(record[3])<<8
-	if symbol&0x20 != 0 {
+	mask := state.EntityMask(record)
+	if symbol&packetEntityHighMaskFlag != 0 {
 		value, err := s.rd.DecodeFreqByte(s.ft, freq.SVCPacketEntityMaskHiXOR)
 		if err != nil {
 			return err
 		}
 		mask ^= uint16(value) << 8
 	}
-	if mask&0x4000 != 0 {
+	if packetEntityHasLowMask(mask) {
 		value, err := s.rd.DecodeFreqByte(s.ft, freq.SVCPacketEntityMaskLoXOR)
 		if err != nil {
 			return err
@@ -303,17 +296,17 @@ func (s *packetEntityStream) decodeBaseEntity(symbol byte) error {
 	if err := decodeDeltaEntityFieldDeltas(s.rd, s.ft, s.state, &record, mask); err != nil {
 		return err
 	}
-	if err := decodeEntityPositionDeltas(s.rd, s.ft, &record, mask, 18, 20, 22); err != nil {
+	if err := decodeEntityOriginDeltas(s.rd, s.ft, &record, mask, wire.EntityOriginCarryOffset); err != nil {
 		return err
 	}
 	origin := state.EntityOrigin(record)
-	for axis := range origin {
-		origin[axis] += state.EntityRecordUint16(record, entityOriginCarryOffset+axis*2)
+	for axis := range 3 {
+		carryOffset := wire.EntityOriginCarryOffset + axis*2
+		origin[axis] += state.EntityRecordUint16(record, carryOffset)
 	}
 	state.SetEntityOrigin(&record, origin)
 	// Retain the effective mask for later delta steps.
-	record[2] = byte(mask)
-	record[3] = byte(mask>>8) & 0x3f
+	state.SetEntityMask(&record, mask)
 	s.entities = append(s.entities, record)
 	return nil
 }
@@ -325,7 +318,7 @@ func (s *packetEntityStream) appendRemainingBase() {
 	}
 }
 
-func (d *packetDecoder) commitPacketEntities(
+func (d *packetDecoder) finishPacketEntities(
 	baseEntities []state.EntityRecord,
 	packetEntities []state.EntityRecord,
 	preserveDelta bool,

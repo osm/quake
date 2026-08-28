@@ -27,14 +27,14 @@ func Decode(rd *rangedec.Decoder, ft *freq.Tables, st *State) ([PayloadSize]byte
 	angles := st.angles
 	angleDeltas := st.angleDeltas
 	movement := st.movement
-	for i, field := range wordFields[:3] {
+	for i, field := range wordFields[:len(angles)] {
 		angleDeltas[i], err = decodeWordDelta(rd, ft, commandMask, field, angleDeltas[i])
 		if err != nil {
 			return out, err
 		}
 		angles[i] = packed.AddWrap16(angles[i], angleDeltas[i])
 	}
-	for i, field := range wordFields[3:] {
+	for i, field := range wordFields[len(angles):] {
 		movement[i], err = decodeWordDelta(rd, ft, commandMask, field, movement[i])
 		if err != nil {
 			return out, err
@@ -62,18 +62,18 @@ func Decode(rd *rangedec.Decoder, ft *freq.Tables, st *State) ([PayloadSize]byte
 		st.impulse = byte(v)
 	}
 
-	out[0x00] = st.msec
+	out[msecOffset] = st.msec
 	for i, angle := range angles {
 		value := unpackAngle(angle)
 		bits := math.Float32bits(value)
-		binary.LittleEndian.PutUint32(out[0x04+i*4:], bits)
-		binary.LittleEndian.PutUint32(out[0x18+i*4:], bits)
+		binary.LittleEndian.PutUint32(out[angleOffset+i*4:], bits)
+		binary.LittleEndian.PutUint32(out[angleCopyOffset+i*4:], bits)
 	}
 	for i, value := range movement {
-		binary.LittleEndian.PutUint16(out[0x10+i*2:], uint16(value))
+		binary.LittleEndian.PutUint16(out[movementOffset+i*2:], uint16(value))
 	}
-	out[0x16] = st.buttons
-	out[0x17] = st.impulse
+	out[buttonsOffset] = st.buttons
+	out[impulseOffset] = st.impulse
 
 	st.commandMask = commandMask
 	st.angles = angles

@@ -3,11 +3,13 @@ package standard
 import (
 	"encoding/binary"
 
+	"github.com/osm/quake/qizmo/internal/wire"
 	"github.com/osm/quake/qizmo/state"
 )
 
 const (
 	spawnBaselinePayloadSize = 13
+	spawnBaselineAxisSize    = 3
 )
 
 func (p *packetParser) parseSpawnBaseline() error {
@@ -22,19 +24,22 @@ func (p *packetParser) parseSpawnBaseline() error {
 
 	var record state.EntityRecord
 	state.SetEntityNumber(&record, entityNumber)
-	state.SetEntityRecordByte(&record, 4, payload[0])
-	state.SetEntityRecordByte(&record, 5, payload[1])
-	state.SetEntityRecordByte(&record, 6, payload[2])
-	state.SetEntityRecordByte(&record, 7, payload[3])
-	state.SetEntityRecordByte(&record, 8, 0)
-	state.SetEntityOrigin(&record, [3]uint16{
-		binary.LittleEndian.Uint16(payload[4:6]),
-		binary.LittleEndian.Uint16(payload[7:9]),
-		binary.LittleEndian.Uint16(payload[10:12]),
-	})
-	state.SetEntityRecordByte(&record, 9, payload[6])
-	state.SetEntityRecordByte(&record, 10, payload[9])
-	state.SetEntityRecordByte(&record, 11, payload[12])
+	byteOffsets := [...]int{
+		wire.EntityModelOffset,
+		wire.EntityFrameOffset,
+		wire.EntityColorMapOffset,
+		wire.EntitySkinNumOffset,
+	}
+	for i, offset := range byteOffsets {
+		state.SetEntityRecordByte(&record, offset, payload[i])
+	}
+	var origin [3]uint16
+	for axis := range 3 {
+		baseOffset := len(byteOffsets) + axis*spawnBaselineAxisSize
+		origin[axis] = binary.LittleEndian.Uint16(payload[baseOffset:])
+		state.SetEntityRecordByte(&record, wire.EntityAngleOffset+axis, payload[baseOffset+2])
+	}
+	state.SetEntityOrigin(&record, origin)
 
 	p.state.Baselines[entityNumber] = record
 	return nil

@@ -135,9 +135,9 @@ func (rd *Decoder) DecodeFreqByte(ft *freq.Tables, freqTableAddr uint32) (byte, 
 func (rd *Decoder) DecodeFreqSymbol(
 	ft *freq.Tables,
 	freqTableAddr uint32,
-	step uint32,
+	symbols uint32,
 ) (uint32, error) {
-	if step == freq.PairedSymbols {
+	if symbols == freq.PairedSymbols {
 		r := freq.RowIndex(freqTableAddr)
 		if r+1 >= len(ft.Cumulative) {
 			return 0, fmt.Errorf(
@@ -148,5 +148,5 @@ func (rd *Decoder) DecodeFreqSymbol(
 		return rd.DecodeSymbolStrict2x256(&ft.Cumulative[r], &ft.Cumulative[r+1])
 	}
 	cum := ft.Cumulative[freq.RowIndex(freqTableAddr)][:]
-	return rd.DecodeSymbolStrict(cum, step)
+	return rd.DecodeSymbolStrict(cum, symbols)
 }

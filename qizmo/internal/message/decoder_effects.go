@@ -11,11 +11,11 @@ import (
 func (d *packetDecoder) decodeSVCDamage(out []byte) ([]byte, error) {
 	rd := d.rd
 	ft := d.ft
-	for _, freqTableAddr := range []uint32{
+	for _, row := range []uint32{
 		freq.SVCDamageArmor,
 		freq.SVCDamageBlood,
 	} {
-		b, err := rd.DecodeFreqByte(ft, freqTableAddr)
+		b, err := rd.DecodeFreqByte(ft, row)
 		if err != nil {
 			return nil, err
 		}
@@ -30,7 +30,7 @@ func (d *packetDecoder) decodeSVCDamage(out []byte) ([]byte, error) {
 	}
 
 	coordinates := d.primaryCoordinates
-	if err := decodeCoordinateTriplet(rd, ft, 0x3f, damageCoordinateDeltaRows, &coordinates); err != nil {
+	if err := decodeCoordinateTriplet(rd, ft, coordinateDeltaMask, damageCoordinateDeltaRows, &coordinates); err != nil {
 		return nil, err
 	}
 	for _, coordinate := range coordinates {
@@ -43,16 +43,29 @@ func (d *packetDecoder) decodeSVCVoice(out []byte) ([]byte, error) {
 	rd := d.rd
 	ft := d.ft
 
-	freqTableAddr := uint32(freq.SVCVoiceData)
 	for i := 0; i < qizmoprotocol.SVCVoicePayloadSize; i++ {
-		b, err := rd.DecodeFreqByte(ft, freqTableAddr)
+		value, err := rd.DecodeFreqByte(ft, freq.SVCVoiceData+uint32(i)*freq.RowSize)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, b)
-		freqTableAddr += 0x400
+		out = append(out, value)
 	}
 	return out, nil
+}
+
+func (d *packetDecoder) decodeSVCMuzzleFlash(out []byte) ([]byte, error) {
+	lo, err := d.rd.DecodeFreqByte(d.ft, freq.SVCTEntBeamEntityLo)
+	if err != nil {
+		return nil, err
+	}
+	hi, err := d.rd.DecodeFreqByte(d.ft, freq.SVCTEntBeamEntityHi)
+	if err != nil {
+		return nil, err
+	}
+
+	entity := d.lastEntity ^ uint16(lo) ^ uint16(hi)<<8
+	d.lastEntity = entity
+	return appendUint16LE(out, entity), nil
 }
 
 func (d *packetDecoder) decodeSVCSound(out []byte) ([]byte, error) {
@@ -101,11 +114,11 @@ func (d *packetDecoder) decodeSVCSound(out []byte) ([]byte, error) {
 
 	coordinates := d.lastCoordinates
 
-	if int8(deltaFlags) >= 0 && entity != 0 {
-		if entity < 0x21 {
+	if deltaFlags&coordinateLastReference == 0 && entity != 0 {
+		if entity <= maxPlayers {
 			if len(basePlayers) != 0 {
 				list := st.CurrentPlayers
-				if deltaFlags&0x40 != 0 {
+				if deltaFlags&soundBasePlayerReference != 0 {
 					list = basePlayers
 				}
 				if resolved, ok := playerCoordinates(list, entity); ok {
@@ -147,7 +160,7 @@ func (d *packetDecoder) decodeSVCTempEntity(out []byte) ([]byte, error) {
 
 	switch tempEntityShapeForType(tempEntityType) {
 	case tempEntityCountedPoint:
-		out, err = d.appendFreqBytes(out, freq.SVCTEntCount, 1)
+		out, err = d.decodeRepeatedRow(out, freq.SVCTEntCount, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +169,7 @@ func (d *packetDecoder) decodeSVCTempEntity(out []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if flags&0x40 != 0 {
+		if flags&beamEntityDelta != 0 {
 			lo, err := rd.DecodeFreqByte(ft, freq.SVCTEntBeamEntityLo)
 			if err != nil {
 				return nil, err
@@ -169,8 +182,8 @@ func (d *packetDecoder) decodeSVCTempEntity(out []byte) ([]byte, error) {
 		}
 		entity := d.lastEntity
 		out = appendUint16LE(out, entity)
-		if int8(flags) >= 0 && entity != 0 {
-			if entity < 0x21 {
+		if flags&coordinateLastReference == 0 && entity != 0 {
+			if entity <= maxPlayers {
 				if len(basePlayers) != 0 {
 					if resolved, ok := playerCoordinates(st.CurrentPlayers, entity); ok {
 						impact = resolved
@@ -194,7 +207,7 @@ func (d *packetDecoder) decodeSVCTempEntity(out []byte) ([]byte, error) {
 		}
 	}
 
-	if err := decodeCoordinateTriplet(rd, ft, 0x3f, tempEntityCoordinateDeltaRows, &impact); err != nil {
+	if err := decodeCoordinateTriplet(rd, ft, coordinateDeltaMask, tempEntityCoordinateDeltaRows, &impact); err != nil {
 		return nil, err
 	}
 	for _, coordinate := range impact {

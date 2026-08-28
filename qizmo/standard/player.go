@@ -21,10 +21,10 @@ func (p *packetParser) parsePlayerInfo() error {
 	}
 
 	record := state.PlayerRecordBytesLE(p.state.DefaultPlayer())
-	record[11] = player
-	copy(record[4:11], positionAndFrame)
+	record[wire.PlayerIndexOffset] = player
+	copy(record[wire.PlayerOriginOffset:wire.PlayerIndexOffset], positionAndFrame)
 	if flags&protocol.PFDead != 0 {
-		record[3] = 0x80
+		record[wire.PlayerMotionMaskOffset] = wire.PlayerDead
 	}
 
 	if flags&protocol.PFMsec != 0 {
@@ -32,7 +32,7 @@ func (p *packetParser) parsePlayerInfo() error {
 		if err != nil {
 			return err
 		}
-		record[46] = msec
+		record[wire.PlayerMsecOffset] = msec
 	}
 
 	if flags&protocol.PFCommand != 0 {
@@ -56,7 +56,7 @@ func (p *packetParser) parsePlayerInfo() error {
 		if err != nil {
 			return err
 		}
-		record[24] = commandMsec
+		record[wire.PlayerCommandMsecOffset] = commandMsec
 	}
 
 	for _, field := range wire.PlayerVelocityFields {

@@ -3,10 +3,29 @@ package message
 import (
 	"github.com/osm/quake/protocol"
 	"github.com/osm/quake/qizmo/freq"
+	"github.com/osm/quake/qizmo/internal/wire"
 	"github.com/osm/quake/qizmo/rangedec"
 )
 
 const maxPlayers = protocol.QWMaxClients
+
+const (
+	printDictionaryStart = 0x120
+	chatDictionaryStart  = 0x140
+)
+
+const (
+	coordinateTripletSize    = 3 * 2
+	nailProjectileSize       = 6
+	coordinateDeltaMask      = 0x3f
+	coordinateLastReference  = 0x80
+	soundEntityShift         = 3
+	soundEntityMask          = (1 << 9) - 1
+	soundBasePlayerReference = 0x40
+	beamEntityDelta          = 0x40
+)
+
+const noPlayerIndex byte = 0xff
 
 const (
 	setInfoKeyOffset           = 1
@@ -16,16 +35,22 @@ const (
 )
 
 const (
-	printDictionaryStart = 0x120
-	chatDictionaryStart  = 0x140
+	packetEntityHighMaskFlag    byte = 1 << 5
+	packetEntityPayloadFlag          = 1 << 6
+	packetEntityNewFlag              = 1 << 7
+	packetEntityRunMask              = packetEntityHighMaskFlag - 1
+	packetEntityNumberDeltaMask      = packetEntityPayloadFlag - 1
+	packetEntityLowMaskFlag          = 1 << 6
+
+	packetEntityRunExtensionBase    = int(packetEntityRunMask) + 1
+	packetEntityNumberExtensionBase = uint16(packetEntityNumberDeltaMask) + 1
+	packetEntityExtensionChunk      = 0xff
+	packetEntityMaxDeltaRun         = packetEntityRunExtensionBase + packetEntityExtensionChunk
 )
 
-const (
-	coordinateTripletSize = 3 * 2
-	nailProjectileSize    = 6
-	soundEntityShift      = 3
-	soundEntityMask       = (1 << 9) - 1
-)
+func packetEntityHasLowMask(mask uint16) bool {
+	return byte(mask>>8)&packetEntityLowMaskFlag != 0
+}
 
 func endCString(data []byte, offset int) (int, bool) {
 	for offset < len(data) {
@@ -120,7 +145,7 @@ var (
 		{freq.SVCDamageFromYLo, freq.SVCDamageFromYHi},
 		{freq.SVCDamageFromZLo, freq.SVCDamageFromZHi},
 	}
-	packetEntityPositionDeltaRows = [3]wordDeltaRows{
+	packetEntityOriginDeltaRows = [3]wordDeltaRows{
 		{freq.SVCPacketEntityPosXLoDelta, freq.SVCPacketEntityPosXHiDelta},
 		{freq.SVCPacketEntityPosYLoDelta, freq.SVCPacketEntityPosYHiDelta},
 		{freq.SVCPacketEntityPosZLoDelta, freq.SVCPacketEntityPosZHiDelta},
@@ -173,12 +198,12 @@ type packetEntityFieldSpec struct {
 }
 
 var packetEntityFields = [...]packetEntityFieldSpec{
-	{packetEntityModelFlag, 4, freq.SVCPacketEntityModelRemapIndex, packetEntityFieldModel},
-	{packetEntityFrameFlag, 5, freq.SVCPacketEntityFrameDelta, packetEntityFieldDelta},
-	{packetEntityColorMapFlag, 6, freq.SVCPacketEntityColorMapDelta, packetEntityFieldDelta},
-	{packetEntitySkinNumFlag, 7, freq.SVCPacketEntitySkinDelta, packetEntityFieldDelta},
-	{packetEntityEffectsFlag, 8, freq.SVCPacketEntityEffectsXOR, packetEntityFieldXOR},
-	{packetEntityAngle1Flag, 9, freq.SVCPacketEntityAngle1Delta, packetEntityFieldDelta},
-	{packetEntityAngle2Flag, 10, freq.SVCPacketEntityAngle2Delta, packetEntityFieldDelta},
-	{packetEntityAngle3Flag, 11, freq.SVCPacketEntityAngle3Delta, packetEntityFieldDelta},
+	{packetEntityModelFlag, wire.EntityModelOffset, freq.SVCPacketEntityModelRemapIndex, packetEntityFieldModel},
+	{packetEntityFrameFlag, wire.EntityFrameOffset, freq.SVCPacketEntityFrameDelta, packetEntityFieldDelta},
+	{packetEntityColorMapFlag, wire.EntityColorMapOffset, freq.SVCPacketEntityColorMapDelta, packetEntityFieldDelta},
+	{packetEntitySkinNumFlag, wire.EntitySkinNumOffset, freq.SVCPacketEntitySkinDelta, packetEntityFieldDelta},
+	{packetEntityEffectsFlag, wire.EntityEffectsOffset, freq.SVCPacketEntityEffectsXOR, packetEntityFieldXOR},
+	{packetEntityAngle1Flag, wire.EntityAngleOffset, freq.SVCPacketEntityAngle1Delta, packetEntityFieldDelta},
+	{packetEntityAngle2Flag, wire.EntityAngleOffset + 1, freq.SVCPacketEntityAngle2Delta, packetEntityFieldDelta},
+	{packetEntityAngle3Flag, wire.EntityAngleOffset + 2, freq.SVCPacketEntityAngle3Delta, packetEntityFieldDelta},
 }
