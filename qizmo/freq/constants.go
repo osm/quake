@@ -1,10 +1,12 @@
 package freq
 
 const (
-	ModelTableBase = 0x080d99a0
-	RowSize        = 0x400
-	Symbols        = 256
-	PairedSymbols  = Symbols * 2
+	ModelTableBase  = 0x080d99a0
+	Rows            = 256
+	Symbols         = 256
+	PairedSymbols   = Symbols * 2
+	RowSize         = Symbols * 4
+	CompressDatSize = Rows * RowSize
 )
 
 const (

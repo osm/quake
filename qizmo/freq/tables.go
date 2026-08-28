@@ -13,7 +13,7 @@ const (
 )
 
 type Tables struct {
-	Cumulative [256][Symbols]uint32
+	Cumulative [Rows][Symbols]uint32
 }
 
 func buildCumulativeRowFromCounts(counts [Symbols]uint32) [Symbols]uint32 {
@@ -38,12 +38,12 @@ func buildCumulativeRowFromCounts(counts [Symbols]uint32) [Symbols]uint32 {
 	return row
 }
 
-func loadRawRows(data []byte) (*[256][Symbols]uint32, error) {
-	if len(data) != 0x40000 {
+func loadRawRows(data []byte) (*[Rows][Symbols]uint32, error) {
+	if len(data) != CompressDatSize {
 		return nil, fmt.Errorf("invalid compress.dat size %d", len(data))
 	}
 
-	var raw [256][Symbols]uint32
+	var raw [Rows][Symbols]uint32
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &raw); err != nil {
 		return nil, fmt.Errorf("read compress.dat: %w", err)
 	}
@@ -63,7 +63,7 @@ func isPairedRow(row int) bool {
 	}
 }
 
-func buildPairedCumulativeRows(tables *Tables, raw *[256][Symbols]uint32, row int) {
+func buildPairedCumulativeRows(tables *Tables, raw *[Rows][Symbols]uint32, row int) {
 	var pair [Symbols * 2]uint32
 	copy(pair[:Symbols], raw[row][:])
 	copy(pair[Symbols:], raw[row+1][:])
