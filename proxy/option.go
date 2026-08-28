@@ -19,3 +19,9 @@ func WithLogger(logger *log.Logger) Option {
 		p.logger = logger
 	}
 }
+
+func WithQizmoCompression() Option {
+	return func(p *Proxy) {
+		p.useQizmoCompression = true
+	}
+}

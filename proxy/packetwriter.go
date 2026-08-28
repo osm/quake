@@ -50,7 +50,7 @@ func (c *Client) DelayCLCFor(delay time.Duration) {
 	c.clcWriterMu.Lock()
 	defer c.clcWriterMu.Unlock()
 
-	if c.conn == nil {
+	if c.peer == nil {
 		return
 	}
 	if c.clcWriter == nil {
@@ -84,12 +84,11 @@ func (c *Client) writeCLC(data []byte) error {
 }
 
 func (c *Client) writeCLCUnlocked(data []byte) error {
-	if c.conn == nil {
+	if c.peer == nil {
 		return errors.New("client CLC writer unavailable")
 	}
 
-	_, err := c.conn.Write(data)
-	return err
+	return c.peer.WritePacket(data)
 }
 
 func (c *Client) closeCLCWriter() {

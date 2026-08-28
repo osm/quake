@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,12 +15,11 @@ import (
 	"github.com/osm/quake/packet/command/connect"
 	"github.com/osm/quake/packet/command/getchallenge"
 	"github.com/osm/quake/packet/command/s2cchallenge"
-	"github.com/osm/quake/packet/command/s2cconnection"
 	"github.com/osm/quake/packet/svc"
 	"github.com/osm/quake/protocol"
+	"github.com/osm/quake/protocol/qizmo"
 )
 
-const maxPacketSize = 8192
 const maxInjectionSize = 512
 
 type HandlerType byte
@@ -32,18 +30,19 @@ const (
 )
 
 type Proxy struct {
-	conn         *net.UDPConn
-	logger       *log.Logger
-	readDeadline time.Duration
-	clientsMu    sync.Mutex
-	clients      map[string]*Client
-	clcHandlers  []func(*Client, packet.Packet)
-	svcHandlers  []func(*Client, packet.Packet)
+	conn                *net.UDPConn
+	logger              *log.Logger
+	readDeadline        time.Duration
+	clientsMu           sync.Mutex
+	clients             map[string]*Client
+	clcHandlers         []func(*Client, packet.Packet)
+	svcHandlers         []func(*Client, packet.Packet)
+	useQizmoCompression bool
 }
 
 type Client struct {
 	addr        *net.UDPAddr
-	conn        *net.UDPConn
+	peer        peerConn
 	connect     *connect.Command
 	count       int
 	logger      *log.Logger
@@ -166,7 +165,7 @@ func (p *Proxy) Serve(addrPort string) error {
 			}
 
 			oob := &svc.Connectionless{Command: c}
-			if _, err := client.conn.Write(oob.Bytes()); err != nil {
+			if err := client.peer.WritePacket(oob.Bytes()); err != nil {
 				p.logger.Printf("unable to write oob data, %v\n", err)
 			}
 		}
@@ -181,36 +180,19 @@ func (p *Proxy) handleClientConnect(cmd *connect.Command, clientAddr *net.UDPAdd
 		return
 	}
 
-	if !strings.Contains(addrPort, ":") {
-		addrPort += ":27500"
+	if p.useQizmoCompression {
+		cmd.UserInfo.Set(qizmo.UserInfoKey, qizmo.UserInfoValue)
 	}
 
-	if idx := strings.IndexRune(addrPort, '@'); idx != -1 {
-		cmd.UserInfo.Set("prx", addrPort[idx+1:])
-		addrPort = addrPort[:idx]
-	}
-
-	addr, err := net.ResolveUDPAddr("udp", addrPort)
-	if err != nil {
-		p.logger.Printf("unable to resolve UDP addr, %v", err)
-		return
-	}
-
-	conn, err := net.DialUDP("udp", nil, addr)
+	peer, err := dialPeer(addrPort, p.useQizmoCompression)
 	if err != nil {
 		p.logger.Printf("unable to initialize target connection to %s, %v", addrPort, err)
 		return
 	}
 
-	client := p.addClient(clientAddr, conn, cmd)
+	client := p.addClient(clientAddr, peer, cmd)
 
-	if _, err := p.conn.WriteToUDP(
-		(&svc.Connectionless{Command: &s2cconnection.Command{}}).Bytes(), client.addr,
-	); err != nil {
-		p.logger.Printf("unable to send s2cconnectio command, %v\n", err)
-	}
-
-	if _, err := conn.Write(
+	if err := peer.WritePacket(
 		(&clc.Connectionless{Command: &getchallenge.Command{}}).Bytes(),
 	); err != nil {
 		p.logger.Printf("unable to send getchallenge command, %v\n", err)
@@ -227,11 +209,11 @@ func (p *Proxy) handlePeer(client *Client) {
 	ctx := context.New()
 
 	for {
-		if err := client.conn.SetReadDeadline(time.Now().Add(p.readDeadline)); err != nil {
+		if err := client.peer.SetReadDeadline(time.Now().Add(p.readDeadline)); err != nil {
 			p.logger.Printf("unable to set read deadline, %v\n", err)
 			continue
 		}
-		n, _, err := client.conn.ReadFromUDP(buf)
+		n, err := client.peer.ReadPacket(buf)
 		if err != nil {
 			if client.count > 1 {
 				client.count--
@@ -241,25 +223,21 @@ func (p *Proxy) handlePeer(client *Client) {
 			p.removeClient(client)
 			return
 		}
-
 		packet, err := svc.Parse(ctx, buf[:n])
 		if err != nil {
 			p.logger.Printf("unable to parse SVC data, %v\n", err)
 			continue
 		}
-
 		switch packet := packet.(type) {
 		case *svc.Connectionless:
 			switch cmd := packet.Command.(type) {
 			case *s2cchallenge.Command:
 				client.connect.ChallengeID = cmd.ChallengeID
-				if _, err := client.conn.Write(
+				if err := client.peer.WritePacket(
 					(&svc.Connectionless{Command: client.connect}).Bytes(),
 				); err != nil {
 					p.logger.Printf("unable to send s2cchallenge command, %v\n", err)
 				}
-				continue
-			case *s2cconnection.Command:
 				continue
 			}
 		}
@@ -300,7 +278,7 @@ func (p *Proxy) handlePeer(client *Client) {
 	}
 }
 
-func (p *Proxy) addClient(addr *net.UDPAddr, conn *net.UDPConn, cmd *connect.Command) *Client {
+func (p *Proxy) addClient(addr *net.UDPAddr, peer peerConn, cmd *connect.Command) *Client {
 	p.clientsMu.Lock()
 	defer p.clientsMu.Unlock()
 
@@ -311,7 +289,7 @@ func (p *Proxy) addClient(addr *net.UDPAddr, conn *net.UDPConn, cmd *connect.Com
 	}
 
 	p.clients[key].addr = addr
-	p.clients[key].conn = conn
+	p.clients[key].peer = peer
 	p.clients[key].connect = cmd
 	p.clients[key].count += 1
 	p.clients[key].logger = p.logger
@@ -331,4 +309,7 @@ func (p *Proxy) removeClient(client *Client) {
 	defer p.clientsMu.Unlock()
 	delete(p.clients, client.addr.String())
 	client.closeCLCWriter()
+	if client.peer != nil {
+		_ = client.peer.Close()
+	}
 }

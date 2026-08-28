@@ -16,10 +16,19 @@ import (
 
 func main() {
 	addrPort := flag.String("listen-addr", "localhost:27500", "listen address")
+	useQizmoCompression := flag.Bool(
+		"use-qizmo-compression",
+		false,
+		"use Qizmo codecs upstream; start compression at the peer manually",
+	)
 	flag.Parse()
 
 	logger := log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime)
-	prx := proxy.New(proxy.WithLogger(logger))
+	options := []proxy.Option{proxy.WithLogger(logger)}
+	if *useQizmoCompression {
+		options = append(options, proxy.WithQizmoCompression())
+	}
+	prx := proxy.New(options...)
 
 	prx.HandleFunc(proxy.SVC, func(_ *proxy.Client, packet packet.Packet) {
 		gameData, ok := packet.(*svc.GameData)
