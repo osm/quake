@@ -7,13 +7,13 @@ import (
 
 type Cmd struct {
 	Msec      byte
+	Padding   [3]byte
 	UserAngle [3]float32
 	Forward   uint16
 	Side      uint16
 	Up        uint16
 	Buttons   byte
 	Impulse   byte
-	Padding   [3]byte
 	Angle     [3]float32
 }
 
@@ -21,6 +21,9 @@ func (cmd *Cmd) Bytes() []byte {
 	buf := buffer.New()
 
 	buf.PutByte(cmd.Msec)
+	for i := range cmd.Padding {
+		buf.PutByte(cmd.Padding[i])
+	}
 
 	for i := 0; i < 3; i++ {
 		buf.PutFloat32(cmd.UserAngle[i])
@@ -29,10 +32,6 @@ func (cmd *Cmd) Bytes() []byte {
 	buf.PutUint16(cmd.Forward)
 	buf.PutUint16(cmd.Side)
 	buf.PutUint16(cmd.Up)
-
-	for i := 0; i < 3; i++ {
-		buf.PutByte(cmd.Padding[i])
-	}
 
 	buf.PutByte(cmd.Buttons)
 	buf.PutByte(cmd.Impulse)
@@ -51,6 +50,11 @@ func parseCmd(ctx *context.Context, buf *buffer.Buffer) (*Cmd, error) {
 	if cmd.Msec, err = buf.ReadByte(); err != nil {
 		return nil, err
 	}
+	for i := range cmd.Padding {
+		if cmd.Padding[i], err = buf.ReadByte(); err != nil {
+			return nil, err
+		}
+	}
 
 	for i := 0; i < 3; i++ {
 		if cmd.UserAngle[i], err = buf.GetFloat32(); err != nil {
@@ -68,12 +72,6 @@ func parseCmd(ctx *context.Context, buf *buffer.Buffer) (*Cmd, error) {
 
 	if cmd.Up, err = buf.GetUint16(); err != nil {
 		return nil, err
-	}
-
-	for i := 0; i < 3; i++ {
-		if cmd.Padding[i], err = buf.ReadByte(); err != nil {
-			return nil, err
-		}
 	}
 
 	if cmd.Buttons, err = buf.ReadByte(); err != nil {
