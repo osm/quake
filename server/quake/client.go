@@ -2,6 +2,7 @@ package quake
 
 import (
 	"net"
+	"sync"
 	"time"
 
 	"github.com/osm/quake/common/sequencer"
@@ -9,6 +10,8 @@ import (
 )
 
 type client struct {
+	mu        sync.Mutex
+	sendMu    sync.Mutex
 	addr      *net.UDPAddr
 	cmds      []command.Command
 	seq       *sequencer.Sequencer
@@ -17,6 +20,9 @@ type client struct {
 }
 
 func (c *client) GetName() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	return c.name
 }
 

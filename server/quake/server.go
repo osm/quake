@@ -3,6 +3,7 @@ package quake
 import (
 	"log"
 	"net"
+	"sync"
 
 	"github.com/osm/quake/packet"
 	"github.com/osm/quake/packet/command"
@@ -10,6 +11,7 @@ import (
 )
 
 type Server struct {
+	mu       sync.Mutex
 	conn     *net.UDPConn
 	logger   *log.Logger
 	clients  map[string]*client
@@ -28,73 +30,111 @@ func (s *Server) HandleFunc(h func(server.Client, packet.Packet) server.HandlerR
 	s.handlers = append(s.handlers, h)
 }
 
-func (s *Server) Enqueue(cmds []command.Command) {
+func (s *Server) snapshot() []*client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	clients := make([]*client, 0, len(s.clients))
 	for _, c := range s.clients {
+		clients = append(clients, c)
+	}
+
+	return clients
+}
+
+func (s *Server) lookup(addr string) *client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.clients[addr]
+}
+
+func (s *Server) Enqueue(cmds []command.Command) {
+	for _, c := range s.snapshot() {
+		c.mu.Lock()
 		c.cmds = append(c.cmds, cmds...)
+		c.mu.Unlock()
 	}
 }
 
 func (s *Server) EnqueueToClient(addr string, cmds []command.Command) {
-	c, ok := s.clients[addr]
-	if !ok {
+	c := s.lookup(addr)
+	if c == nil {
 		return
 	}
+
+	c.mu.Lock()
 	c.cmds = append(c.cmds, cmds...)
+	c.mu.Unlock()
 }
 
 func (s *Server) Flush() {
-	for _, c := range s.clients {
-		if len(c.cmds) == 0 {
-			continue
+	for _, c := range s.snapshot() {
+		c.mu.Lock()
+		pending := len(c.cmds) > 0
+		c.mu.Unlock()
+		if pending {
+			s.flushClient(c, 0, 0, nil)
 		}
-		s.flushClient(c, 0, 0, nil)
 	}
 }
 
 func (s *Server) FlushClient(addr string) {
-	c, ok := s.clients[addr]
-	if !ok || len(c.cmds) == 0 {
+	c := s.lookup(addr)
+	if c == nil {
 		return
 	}
-	s.flushClient(c, 0, 0, nil)
+
+	c.mu.Lock()
+	pending := len(c.cmds) > 0
+	c.mu.Unlock()
+	if pending {
+		s.flushClient(c, 0, 0, nil)
+	}
 }
 
 func (s *Server) ResetClient(addr string) {
-	c, ok := s.clients[addr]
-	if !ok {
+	c := s.lookup(addr)
+	if c == nil {
 		return
 	}
+
+	c.mu.Lock()
 	c.resetSession(localServerPing)
+	c.mu.Unlock()
+}
+
+func (s *Server) socket() *net.UDPConn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.conn
 }
 
 func (s *Server) Close() error {
-	if s.conn == nil {
-		return nil
+	if conn := s.socket(); conn != nil {
+		return conn.Close()
 	}
-	return s.conn.Close()
+	return nil
 }
 
 func (s *Server) WriteRawToClients(pkt packet.Packet) {
-	if s.conn == nil || pkt == nil {
-		return
-	}
-	buf := pkt.Bytes()
-	for _, c := range s.clients {
-		if _, err := s.conn.WriteToUDP(buf, c.addr); err != nil {
-			s.logger.Printf("unable to write raw packet to client, %v", err)
-		}
+	for _, c := range s.snapshot() {
+		s.WriteRawToClient(c.GetAddr(), pkt)
 	}
 }
 
 func (s *Server) WriteRawToClient(addr string, pkt packet.Packet) {
-	if s.conn == nil || pkt == nil {
+	conn := s.socket()
+	if conn == nil || pkt == nil {
 		return
 	}
-	c, ok := s.clients[addr]
-	if !ok {
+	c := s.lookup(addr)
+	if c == nil {
 		return
 	}
-	if _, err := s.conn.WriteToUDP(pkt.Bytes(), c.addr); err != nil {
+
+	if _, err := conn.WriteToUDP(pkt.Bytes(), c.addr); err != nil {
 		s.logger.Printf("unable to write raw packet to client, %v", err)
 	}
 }

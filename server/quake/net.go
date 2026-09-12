@@ -32,14 +32,21 @@ func (s *Server) ListenAndServe(addrPort string) error {
 }
 
 func (s *Server) Serve(conn *net.UDPConn) error {
+	s.mu.Lock()
 	s.conn = conn
+	s.mu.Unlock()
 	defer conn.Close()
 
 	go func() {
 		for {
-			for _, c := range s.clients {
-				if time.Since(c.lastWrite).Seconds() > float64(5) {
+			for _, c := range s.snapshot() {
+				c.mu.Lock()
+				expired := time.Since(c.lastWrite).Seconds() > float64(5)
+				c.mu.Unlock()
+				if expired {
+					s.mu.Lock()
 					delete(s.clients, c.addr.String())
+					s.mu.Unlock()
 				}
 			}
 
@@ -66,6 +73,7 @@ func (s *Server) Serve(conn *net.UDPConn) error {
 		}
 		key := clientAddr.String()
 
+		s.mu.Lock()
 		c, ok := s.clients[key]
 		if !ok {
 			c = &client{
@@ -76,6 +84,7 @@ func (s *Server) Serve(conn *net.UDPConn) error {
 
 			s.clients[key] = c
 		}
+		s.mu.Unlock()
 
 		var clientCmds []command.Command
 		var incomingSeq uint32
@@ -110,13 +119,14 @@ func (s *Server) processCommands(
 	incomingSeq, incomingAck uint32,
 	clientCmds []command.Command,
 ) {
+	client.mu.Lock()
 	var cmds []command.Command
 
 	for _, clientCmd := range clientCmds {
 		for _, cmd := range s.handleClientCommand(client, clientCmd) {
 			switch cmd := cmd.(type) {
 			case *s2cchallenge.Command, *s2cconnection.Command:
-				if _, err := s.conn.WriteToUDP(
+				if _, err := s.socket().WriteToUDP(
 					(&svc.Connectionless{Command: cmd}).Bytes(),
 					client.addr,
 				); err != nil {
@@ -137,9 +147,11 @@ func (s *Server) processCommands(
 	// that advances the local client's ack state before the upstream server has
 	// sent any real sequenced traffic.
 	if incomingSeq == 0 && incomingAck == 0 && len(cmds) == 0 && len(client.cmds) == 0 {
+		client.mu.Unlock()
 		return
 	}
 
+	client.mu.Unlock()
 	s.flushClient(client, incomingSeq, incomingAck, cmds)
 }
 
@@ -148,6 +160,11 @@ func (s *Server) flushClient(
 	incomingSeq, incomingAck uint32,
 	cmds []command.Command,
 ) {
+	client.sendMu.Lock()
+	defer client.sendMu.Unlock()
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
 	outSeq, outAck, outCmds, err := client.seq.Process(incomingSeq, incomingAck, cmds)
 	if err == sequencer.ErrRateLimit {
 		return
@@ -155,7 +172,7 @@ func (s *Server) flushClient(
 
 	allCmds := append(outCmds, client.cmds...)
 
-	if _, err := s.conn.WriteToUDP(
+	if _, err := s.socket().WriteToUDP(
 		(&svc.GameData{
 			Seq:      outSeq,
 			Ack:      outAck,
