@@ -7,10 +7,14 @@ import (
 
 	"github.com/osm/quake/common/context"
 	"github.com/osm/quake/common/sequencer"
+	"github.com/osm/quake/packet"
 	"github.com/osm/quake/packet/clc"
 	"github.com/osm/quake/packet/command"
+	"github.com/osm/quake/packet/command/connect"
+	"github.com/osm/quake/packet/command/getchallenge"
 	"github.com/osm/quake/packet/command/s2cchallenge"
 	"github.com/osm/quake/packet/command/s2cconnection"
+	"github.com/osm/quake/packet/command/stringcmd"
 	"github.com/osm/quake/packet/svc"
 	"github.com/osm/quake/protocol"
 )
@@ -36,152 +40,172 @@ func (s *Server) Serve(conn *net.UDPConn) error {
 	s.conn = conn
 	s.mu.Unlock()
 	defer conn.Close()
-
-	go func() {
-		for {
-			for _, c := range s.snapshot() {
-				c.mu.Lock()
-				expired := time.Since(c.lastWrite).Seconds() > float64(5)
-				c.mu.Unlock()
-				if expired {
-					s.mu.Lock()
-					delete(s.clients, c.addr.String())
-					s.mu.Unlock()
-				}
-			}
-
-			time.Sleep(time.Second * 60)
+	defer func() {
+		for _, c := range s.snapshot() {
+			s.removeClient(c)
 		}
 	}()
 
-	buf := make([]byte, 1024*64)
+	buf := make([]byte, 65536)
 	ctx := context.New(context.WithProtocolVersion(protocol.VersionQW))
+	nextExpiry := time.Now().Add(time.Second)
+
 	for {
-		n, clientAddr, err := conn.ReadFromUDP(buf)
+		_ = conn.SetReadDeadline(nextExpiry)
+		n, addr, err := conn.ReadFromUDP(buf)
+		if !time.Now().Before(nextExpiry) {
+			s.expireClients()
+			nextExpiry = time.Now().Add(time.Second)
+		}
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			s.logger.Printf("unable to read from socket, %v", err)
-			continue
+			if e, ok := err.(net.Error); ok && e.Timeout() {
+				continue
+			}
+			return err
 		}
 
-		packet, err := clc.Parse(ctx, buf[:n])
+		pkt, err := clc.Parse(ctx, buf[:n])
 		if err != nil {
-			s.logger.Printf("unable to parse CLC data, %v\n", err)
+			s.logger.Printf("unable to parse CLC data: %v", err)
 			continue
 		}
-		key := clientAddr.String()
 
+		s.handlePacket(conn, addr, pkt)
+	}
+}
+
+func (s *Server) expireClients() {
+	for _, c := range s.snapshot() {
+		c.mu.Lock()
+		expired := time.Since(c.lastRead) > 60*time.Second
+		c.mu.Unlock()
+		if expired {
+			s.removeClient(c)
+		}
+	}
+}
+
+func (s *Server) packetClient(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.Packet) *client {
+	c := s.lookup(addr.String())
+	oob, ok := pkt.(*clc.Connectionless)
+	if !ok {
+		return c
+	}
+
+	switch oob.Command.(type) {
+	case *getchallenge.Command:
+		temporary := &client{addr: addr}
+		for _, cmd := range s.handleClientCommand(temporary, oob.Command) {
+			_, _ = conn.WriteToUDP((&svc.Connectionless{Command: cmd}).Bytes(), addr)
+		}
+		return nil
+	case *connect.Command:
+		if c != nil {
+			s.removeClient(c)
+		}
+		c = &client{
+			done:     make(chan struct{}),
+			addr:     addr,
+			lastRead: time.Now(),
+		}
+		c.resetSession(localServerPing)
 		s.mu.Lock()
-		c, ok := s.clients[key]
-		if !ok {
-			c = &client{
-				addr:      clientAddr,
-				seq:       sequencer.New(sequencer.WithOutgoingSeq(1), sequencer.WithPing(localServerPing)),
-				lastWrite: time.Now(),
-			}
-
-			s.clients[key] = c
-		}
+		s.clients[addr.String()] = c
 		s.mu.Unlock()
+	}
 
-		var clientCmds []command.Command
-		var incomingSeq uint32
-		var incomingAck uint32
-		consume := false
+	return c
+}
 
-		switch p := packet.(type) {
-		case *clc.Connectionless:
-			clientCmds = []command.Command{p.Command}
-		case *clc.GameData:
-			clientCmds = p.Commands
-			incomingSeq = p.Seq
-			incomingAck = p.Ack
-		}
+func (s *Server) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.Packet) {
+	c := s.packetClient(conn, addr, pkt)
+	if c == nil {
+		return
+	}
 
-		for _, h := range s.handlers {
-			res := h(c, packet)
-			s.Enqueue(res.Commands)
-			consume = consume || res.Consume
-		}
+	c.mu.Lock()
+	c.lastRead = time.Now()
+	c.mu.Unlock()
 
-		if consume {
-			continue
-		}
+	consume := false
+	for _, h := range s.handlers {
+		result := h(c, pkt)
+		s.Enqueue(result.Commands)
+		consume = consume || result.Consume
+	}
+	if consume {
+		return
+	}
 
-		s.processCommands(c, incomingSeq, incomingAck, clientCmds)
+	var inputs []command.Command
+	switch p := pkt.(type) {
+	case *clc.Connectionless:
+		inputs = []command.Command{p.Command}
+	case *clc.GameData:
+		inputs = p.Commands
+	}
+
+	commands, dropping := s.dispatchCommands(conn, c, inputs)
+	if dropping {
+		s.removeClient(c)
+		return
+	}
+	if game, ok := pkt.(*clc.GameData); ok {
+		s.flushClient(c, game.Seq, game.Ack, commands)
 	}
 }
 
-func (s *Server) processCommands(
-	client *client,
-	incomingSeq, incomingAck uint32,
-	clientCmds []command.Command,
-) {
-	client.mu.Lock()
-	var cmds []command.Command
+func (s *Server) dispatchCommands(conn *net.UDPConn, c *client, inputs []command.Command) ([]command.Command, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	for _, clientCmd := range clientCmds {
-		for _, cmd := range s.handleClientCommand(client, clientCmd) {
-			switch cmd := cmd.(type) {
+	var reliable []command.Command
+	dropping := false
+	for _, input := range inputs {
+		if str, ok := input.(*stringcmd.Command); ok && str.String == "drop" {
+			dropping = true
+		}
+		for _, output := range s.handleClientCommand(c, input) {
+			switch output.(type) {
 			case *s2cchallenge.Command, *s2cconnection.Command:
-				if _, err := s.socket().WriteToUDP(
-					(&svc.Connectionless{Command: cmd}).Bytes(),
-					client.addr,
-				); err != nil {
-					s.logger.Printf("unable to send command, %v", err)
-				}
+				_, _ = conn.WriteToUDP((&svc.Connectionless{Command: output}).Bytes(), c.addr)
 			default:
-				cmds = append(cmds, cmd)
+				reliable = append(reliable, output)
 			}
 		}
 	}
 
-	if client.seq.GetState() != sequencer.Connected && incomingSeq != 0 {
-		client.seq.SetState(sequencer.Connected)
-	}
-
-	// Connectionless commands send their own replies directly. In raw live mode
-	// we must not follow them with a synthetic empty sequenced packet, because
-	// that advances the local client's ack state before the upstream server has
-	// sent any real sequenced traffic.
-	if incomingSeq == 0 && incomingAck == 0 && len(cmds) == 0 && len(client.cmds) == 0 {
-		client.mu.Unlock()
-		return
-	}
-
-	client.mu.Unlock()
-	s.flushClient(client, incomingSeq, incomingAck, cmds)
+	return reliable, dropping
 }
 
-func (s *Server) flushClient(
-	client *client,
-	incomingSeq, incomingAck uint32,
-	cmds []command.Command,
-) {
-	client.sendMu.Lock()
-	defer client.sendMu.Unlock()
-	client.mu.Lock()
-	defer client.mu.Unlock()
+func (s *Server) flushClient(c *client, incomingSeq, incomingAck uint32, reliable []command.Command) {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
 
-	outSeq, outAck, outCmds, err := client.seq.Process(incomingSeq, incomingAck, cmds)
-	if err == sequencer.ErrRateLimit {
+	c.mu.Lock()
+	if c.seq.GetState() != sequencer.Connected && incomingSeq != 0 {
+		c.seq.SetState(sequencer.Connected)
+	}
+	seq, ack, commands, err := c.seq.Process(incomingSeq, incomingAck, reliable)
+	if err != nil {
+		c.mu.Unlock()
 		return
 	}
 
-	allCmds := append(outCmds, client.cmds...)
+	commands = append(commands, c.cmds...)
+	c.cmds = nil
+	c.mu.Unlock()
 
-	if _, err := s.socket().WriteToUDP(
-		(&svc.GameData{
-			Seq:      outSeq,
-			Ack:      outAck,
-			Commands: allCmds,
-		}).Bytes(),
-		client.addr,
-	); err != nil {
-		s.logger.Printf("unable to write data to socket, %v", err)
+	p := &svc.GameData{Seq: seq, Ack: ack, Commands: commands}
+	conn := s.socket()
+	if conn == nil {
+		return
 	}
-	client.lastWrite = time.Now()
-	client.cmds = []command.Command{}
+
+	if _, err := conn.WriteToUDP(p.Bytes(), c.addr); err != nil {
+		s.logger.Printf("unable to write data to socket: %v", err)
+	}
 }

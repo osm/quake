@@ -10,13 +10,14 @@ import (
 )
 
 type client struct {
-	mu        sync.Mutex
-	sendMu    sync.Mutex
-	addr      *net.UDPAddr
-	cmds      []command.Command
-	seq       *sequencer.Sequencer
-	lastWrite time.Time
-	name      string
+	done     chan struct{}
+	mu       sync.Mutex
+	sendMu   sync.Mutex
+	addr     *net.UDPAddr
+	cmds     []command.Command
+	seq      *sequencer.Sequencer
+	name     string
+	lastRead time.Time
 }
 
 func (c *client) GetName() string {
@@ -30,11 +31,15 @@ func (c *client) GetAddr() string {
 	if c.addr == nil {
 		return ""
 	}
+
 	return c.addr.String()
 }
 
 func (c *client) resetSession(ping int16) {
 	c.cmds = nil
 	c.seq = sequencer.New(sequencer.WithOutgoingSeq(1), sequencer.WithPing(ping))
-	c.lastWrite = time.Now()
+}
+
+func (c *client) Done() <-chan struct{} {
+	return c.done
 }

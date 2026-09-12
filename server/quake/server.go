@@ -11,11 +11,12 @@ import (
 )
 
 type Server struct {
-	mu       sync.Mutex
-	conn     *net.UDPConn
-	logger   *log.Logger
-	clients  map[string]*client
-	handlers []func(server.Client, packet.Packet) server.HandlerResult
+	mu                 sync.Mutex
+	conn               *net.UDPConn
+	logger             *log.Logger
+	clients            map[string]*client
+	handlers           []func(server.Client, packet.Packet) server.HandlerResult
+	disconnectHandlers []func(server.Client)
 }
 
 func New(logger *log.Logger) Server {
@@ -28,6 +29,10 @@ func New(logger *log.Logger) Server {
 // Register handlers before serving: they are read without locking.
 func (s *Server) HandleFunc(h func(server.Client, packet.Packet) server.HandlerResult) {
 	s.handlers = append(s.handlers, h)
+}
+
+func (s *Server) HandleDisconnectFunc(h func(server.Client)) {
+	s.disconnectHandlers = append(s.disconnectHandlers, h)
 }
 
 func (s *Server) snapshot() []*client {
@@ -136,5 +141,21 @@ func (s *Server) WriteRawToClient(addr string, pkt packet.Packet) {
 
 	if _, err := conn.WriteToUDP(pkt.Bytes(), c.addr); err != nil {
 		s.logger.Printf("unable to write raw packet to client, %v", err)
+	}
+}
+
+func (s *Server) removeClient(c *client) {
+	s.mu.Lock()
+	if s.clients[c.GetAddr()] != c {
+		s.mu.Unlock()
+		return
+	}
+
+	delete(s.clients, c.GetAddr())
+	close(c.done)
+	s.mu.Unlock()
+
+	for _, h := range s.disconnectHandlers {
+		h(c)
 	}
 }
