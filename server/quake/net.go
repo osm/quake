@@ -125,6 +125,12 @@ func (s *Server) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 		return
 	}
 
+	if game, ok := pkt.(*clc.GameData); ok {
+		for _, h := range s.inputHandlers {
+			h(c, game)
+		}
+	}
+
 	consume := false
 	for _, h := range s.handlers {
 		result := h(c, pkt)
@@ -192,6 +198,9 @@ func (s *Server) flushClient(c *client, reliable []command.Command) {
 	c.mu.Unlock()
 
 	p := &svc.GameData{Seq: seq, Ack: ack, Commands: commands}
+	for _, h := range s.outputHandlers {
+		h(c, p)
+	}
 	conn := s.socket()
 	if conn == nil {
 		return

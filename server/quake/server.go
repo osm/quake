@@ -6,7 +6,9 @@ import (
 	"sync"
 
 	"github.com/osm/quake/packet"
+	"github.com/osm/quake/packet/clc"
 	"github.com/osm/quake/packet/command"
+	"github.com/osm/quake/packet/svc"
 	"github.com/osm/quake/server"
 )
 
@@ -16,6 +18,8 @@ type Server struct {
 	logger             *log.Logger
 	clients            map[string]*client
 	handlers           []func(server.Client, packet.Packet) server.HandlerResult
+	inputHandlers      []func(server.Client, *clc.GameData)
+	outputHandlers     []func(server.Client, *svc.GameData)
 	disconnectHandlers []func(server.Client)
 }
 
@@ -29,6 +33,15 @@ func New(logger *log.Logger) Server {
 // Register handlers before serving: they are read without locking.
 func (s *Server) HandleFunc(h func(server.Client, packet.Packet) server.HandlerResult) {
 	s.handlers = append(s.handlers, h)
+}
+
+func (s *Server) HandleInputFunc(h func(server.Client, *clc.GameData)) {
+	s.inputHandlers = append(s.inputHandlers, h)
+}
+
+// Flush can invoke output handlers from other goroutines; protect shared callback state.
+func (s *Server) HandleOutputFunc(h func(server.Client, *svc.GameData)) {
+	s.outputHandlers = append(s.outputHandlers, h)
 }
 
 func (s *Server) HandleDisconnectFunc(h func(server.Client)) {
@@ -75,12 +88,7 @@ func (s *Server) EnqueueToClient(addr string, cmds []command.Command) {
 
 func (s *Server) Flush() {
 	for _, c := range s.snapshot() {
-		c.mu.Lock()
-		pending := len(c.cmds) > 0
-		c.mu.Unlock()
-		if pending {
-			s.flushClient(c, nil)
-		}
+		s.flushClient(c, nil)
 	}
 }
 
@@ -90,12 +98,7 @@ func (s *Server) FlushClient(addr string) {
 		return
 	}
 
-	c.mu.Lock()
-	pending := len(c.cmds) > 0
-	c.mu.Unlock()
-	if pending {
-		s.flushClient(c, nil)
-	}
+	s.flushClient(c, nil)
 }
 
 func (s *Server) ResetClient(addr string) {
