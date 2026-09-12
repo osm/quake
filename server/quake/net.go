@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/osm/quake/common/context"
-	"github.com/osm/quake/common/sequencer"
 	"github.com/osm/quake/packet"
 	"github.com/osm/quake/packet/clc"
 	"github.com/osm/quake/packet/command"
@@ -122,13 +121,9 @@ func (s *Server) packetClient(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 
 func (s *Server) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.Packet) {
 	c := s.packetClient(conn, addr, pkt)
-	if c == nil {
+	if c == nil || !c.acceptPacket(pkt) {
 		return
 	}
-
-	c.mu.Lock()
-	c.lastRead = time.Now()
-	c.mu.Unlock()
 
 	consume := false
 	for _, h := range s.handlers {
@@ -153,8 +148,8 @@ func (s *Server) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 		s.removeClient(c)
 		return
 	}
-	if game, ok := pkt.(*clc.GameData); ok {
-		s.flushClient(c, game.Seq, game.Ack, commands)
+	if _, ok := pkt.(*clc.GameData); ok {
+		s.flushClient(c, commands)
 	}
 }
 
@@ -181,15 +176,12 @@ func (s *Server) dispatchCommands(conn *net.UDPConn, c *client, inputs []command
 	return reliable, dropping
 }
 
-func (s *Server) flushClient(c *client, incomingSeq, incomingAck uint32, reliable []command.Command) {
+func (s *Server) flushClient(c *client, reliable []command.Command) {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
 
 	c.mu.Lock()
-	if c.seq.GetState() != sequencer.Connected && incomingSeq != 0 {
-		c.seq.SetState(sequencer.Connected)
-	}
-	seq, ack, commands, err := c.seq.Process(incomingSeq, incomingAck, reliable)
+	seq, ack, commands, err := c.seq.Emit(reliable)
 	if err != nil {
 		c.mu.Unlock()
 		return

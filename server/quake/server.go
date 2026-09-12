@@ -79,7 +79,7 @@ func (s *Server) Flush() {
 		pending := len(c.cmds) > 0
 		c.mu.Unlock()
 		if pending {
-			s.flushClient(c, 0, 0, nil)
+			s.flushClient(c, nil)
 		}
 	}
 }
@@ -94,7 +94,7 @@ func (s *Server) FlushClient(addr string) {
 	pending := len(c.cmds) > 0
 	c.mu.Unlock()
 	if pending {
-		s.flushClient(c, 0, 0, nil)
+		s.flushClient(c, nil)
 	}
 }
 
