@@ -21,6 +21,8 @@ type Server struct {
 	inputHandlers      []func(server.Client, *clc.GameData)
 	outputHandlers     []func(server.Client, *svc.GameData)
 	disconnectHandlers []func(server.Client)
+	lobby              *Lobby
+	nextUserID         uint32
 }
 
 func New(logger *log.Logger) Server {

@@ -9,6 +9,7 @@ import (
 	"github.com/osm/quake/packet"
 	"github.com/osm/quake/packet/clc"
 	"github.com/osm/quake/packet/command"
+	"github.com/osm/quake/packet/command/a2cprint"
 	"github.com/osm/quake/packet/command/connect"
 	"github.com/osm/quake/packet/command/getchallenge"
 	"github.com/osm/quake/packet/command/s2cchallenge"
@@ -94,7 +95,7 @@ func (s *Server) packetClient(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 		return c
 	}
 
-	switch oob.Command.(type) {
+	switch input := oob.Command.(type) {
 	case *getchallenge.Command:
 		temporary := &client{addr: addr}
 		for _, cmd := range s.handleClientCommand(temporary, oob.Command) {
@@ -111,6 +112,11 @@ func (s *Server) packetClient(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 			lastRead: time.Now(),
 		}
 		c.resetSession(localServerPing)
+		if s.lobby != nil && !s.admitLobbyClient(c, input.UserInfo.Get("name")) {
+			response := &svc.Connectionless{Command: &a2cprint.Command{String: "Server is full.\n"}}
+			_, _ = conn.WriteToUDP(response.Bytes(), addr)
+			return nil
+		}
 		s.mu.Lock()
 		s.clients[addr.String()] = c
 		s.mu.Unlock()
@@ -125,14 +131,15 @@ func (s *Server) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 		return
 	}
 
+	var reliable []command.Command
 	if game, ok := pkt.(*clc.GameData); ok {
+		reliable = s.lobbyInput(c, game)
 		for _, h := range s.inputHandlers {
 			h(c, game)
 		}
 	}
 
 	consume := false
-	var reliable []command.Command
 	for _, h := range s.handlers {
 		result := h(c, pkt)
 		s.Enqueue(result.Commands)
@@ -188,7 +195,11 @@ func (s *Server) flushClient(c *client, reliable []command.Command) {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
 
+	players := s.lobbyPlayers()
 	c.mu.Lock()
+	if s.lobby != nil && c.lobbyStage >= lobbySpawnSent {
+		reliable = append(reliable, c.updateScoreboard(players)...)
+	}
 	seq, ack, commands, err := c.seq.Emit(reliable)
 	if err != nil {
 		c.mu.Unlock()
@@ -197,8 +208,16 @@ func (s *Server) flushClient(c *client, reliable []command.Command) {
 
 	commands = append(commands, c.cmds...)
 	c.cmds = nil
+	active := s.lobby != nil && c.lobbyStage == lobbyActive
+	if active {
+		commands = append(commands, s.lobby.frame(c)...)
+	}
 	c.mu.Unlock()
 
+	// Stats callbacks may call client methods that take c.mu.
+	if active {
+		commands = append(commands, s.lobby.stats(c)...)
+	}
 	p := &svc.GameData{Seq: seq, Ack: ack, Commands: commands}
 	for _, h := range s.outputHandlers {
 		h(c, p)

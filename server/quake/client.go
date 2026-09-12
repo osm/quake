@@ -13,16 +13,22 @@ import (
 )
 
 type client struct {
-	done     chan struct{}
-	mu       sync.Mutex
-	sendMu   sync.Mutex
-	addr     *net.UDPAddr
-	cmds     []command.Command
-	seq      *sequencer.Sequencer
-	name     string
-	lastRead time.Time
-	received bool
-	incoming uint32
+	done         chan struct{}
+	mu           sync.Mutex
+	sendMu       sync.Mutex
+	addr         *net.UDPAddr
+	cmds         []command.Command
+	seq          *sequencer.Sequencer
+	name         string
+	slot         byte
+	userID       uint32
+	scoreboard   [protocol.QWMaxClients]lobbyPlayer
+	lastRead     time.Time
+	received     bool
+	incoming     uint32
+	lobbyStage   int
+	lobbyStarted time.Time
+	zExtensions  int
 }
 
 func (c *client) GetName() string {
@@ -43,6 +49,9 @@ func (c *client) GetAddr() string {
 func (c *client) resetSession(ping int16) {
 	c.cmds = nil
 	c.received = false
+	c.lobbyStage = lobbyIdle
+	c.scoreboard = [protocol.QWMaxClients]lobbyPlayer{}
+	c.lobbyStarted = time.Time{}
 	c.seq = sequencer.New(sequencer.WithOutgoingSeq(1), sequencer.WithPing(ping))
 }
 
