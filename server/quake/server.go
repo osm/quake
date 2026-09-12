@@ -23,6 +23,7 @@ func New(logger *log.Logger) Server {
 	}
 }
 
+// Register handlers before serving: they are read without locking.
 func (s *Server) HandleFunc(h func(server.Client, packet.Packet) server.HandlerResult) {
 	s.handlers = append(s.handlers, h)
 }

@@ -27,7 +27,13 @@ func (s *Server) ListenAndServe(addrPort string) error {
 	if err != nil {
 		return err
 	}
+
+	return s.Serve(conn)
+}
+
+func (s *Server) Serve(conn *net.UDPConn) error {
 	s.conn = conn
+	defer conn.Close()
 
 	go func() {
 		for {
