@@ -6,8 +6,9 @@ import (
 )
 
 type HandlerResult struct {
-	Commands []command.Command
-	Consume  bool
+	Commands       []command.Command
+	ClientCommands []command.Command
+	Consume        bool
 }
 
 type Server interface {

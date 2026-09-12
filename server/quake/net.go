@@ -132,9 +132,11 @@ func (s *Server) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 	}
 
 	consume := false
+	var reliable []command.Command
 	for _, h := range s.handlers {
 		result := h(c, pkt)
 		s.Enqueue(result.Commands)
+		reliable = append(reliable, result.ClientCommands...)
 		consume = consume || result.Consume
 	}
 	if consume {
@@ -155,7 +157,7 @@ func (s *Server) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, pkt packet.P
 		return
 	}
 	if _, ok := pkt.(*clc.GameData); ok {
-		s.flushClient(c, commands)
+		s.flushClient(c, append(reliable, commands...))
 	}
 }
 
