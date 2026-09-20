@@ -26,6 +26,7 @@ type Data struct {
 	Read      *Read
 	Set       *Set
 	Multiple  *Multiple
+	original  []byte
 }
 
 func (d *Demo) Bytes() []byte {
@@ -66,17 +67,48 @@ func (d *Data) Bytes() []byte {
 	return buf.Bytes()
 }
 
-func Parse(ctx *context.Context, data []byte) (*Demo, error) {
-	var err error
-	var cmd Demo
+// OriginalBytes returns the exact record bytes consumed by Parse. It returns
+// nil for Data values that were not produced by Parse. Callers must not modify
+// the returned storage.
+func (d *Data) OriginalBytes() []byte {
+	return d.original
+}
 
-	buf := buffer.New(buffer.WithData(data))
+func Parse(ctx *context.Context, data []byte) (*Demo, error) {
+	var cmd Demo
+	trailing, err := ParseRecords(ctx, data, func(data *Data) error {
+		cmd.Data = append(cmd.Data, *data)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	cmd.TrailingData = append([]byte(nil), trailing...)
+	return &cmd, nil
+}
+
+// ParseRecords parses an MVD and visits each record in wire order. The Data
+// value and returned trailing bytes refer to the input storage and must not be
+// modified. Callers that need to retain parsed records should copy the Data
+// value, as Parse does.
+func ParseRecords(
+	ctx *context.Context,
+	input []byte,
+	visit func(*Data) error,
+) ([]byte, error) {
+	if visit == nil {
+		return nil, errors.New("nil MVD record visitor")
+	}
+	var err error
+
+	buf := buffer.New(buffer.WithData(input))
 	ctx.SetIsMVD(true)
 
 	for buf.Off() < buf.Len() {
 		var data Data
 
 	process:
+		start := buf.Off()
 		if data.Timestamp, err = buf.ReadByte(); err != nil {
 			return nil, err
 		}
@@ -93,10 +125,13 @@ func Parse(ctx *context.Context, data []byte) (*Demo, error) {
 			data.Target = data.Multiple.LastTo
 
 			if data.Multiple.IsHiddenPacket {
-				cmd.Data = append(cmd.Data, data)
+				data.original = buf.Bytes()[start:buf.Off()]
+				if err := visit(&data); err != nil {
+					return nil, err
+				}
 
 				if buf.Off() == buf.Len() {
-					goto end
+					return nil, nil
 				}
 
 				goto process
@@ -129,15 +164,16 @@ func Parse(ctx *context.Context, data []byte) (*Demo, error) {
 			return nil, ErrUnknownType
 		}
 
-		cmd.Data = append(cmd.Data, data)
+		data.original = buf.Bytes()[start:buf.Off()]
+		if err := visit(&data); err != nil {
+			return nil, err
+		}
 		if data.endsDemo() {
-			cmd.TrailingData = append([]byte(nil), buf.Bytes()[buf.Off():]...)
-			break
+			return buf.Bytes()[buf.Off():], nil
 		}
 	}
 
-end:
-	return &cmd, nil
+	return nil, nil
 }
 
 func (d Data) endsDemo() bool {

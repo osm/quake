@@ -1,0 +1,454 @@
+package frequency
+
+// These IDs are fixed by format v1 and select rows in MVZF artifacts.
+// Keep their order: the grouping below does not renumber the models.
+const (
+	// MVD record fields.
+	ModelRawByte Model = iota
+	ModelRecordKind
+	ModelTimestamp
+	ModelCommandTarget
+	ModelLength
+	ModelRecordBodyMode
+	ModelOperationKind
+
+	// Player fields.
+	ModelPlayerCoordSize
+	ModelPlayerIndex
+	ModelPlayerBitsLoXOR
+	ModelPlayerBitsHiXOR
+	ModelPlayerFrameDelta
+	ModelPlayerOriginXLoDelta
+	ModelPlayerOriginXHiDelta
+	ModelPlayerOriginYLoDelta
+	ModelPlayerOriginYHiDelta
+	ModelPlayerOriginZLoDelta
+	ModelPlayerOriginZHiDelta
+	ModelPlayerOriginByte2Delta
+	ModelPlayerOriginByte3Delta
+	ModelPlayerPitchLoDelta
+	ModelPlayerPitchHiDelta
+	ModelPlayerYawLoDelta
+	ModelPlayerYawHiDelta
+	ModelPlayerRollLoDelta
+	ModelPlayerRollHiDelta
+	ModelPlayerModelDelta
+	ModelPlayerSkinDelta
+	ModelPlayerEffectsXOR
+	ModelPlayerWeaponFrameDelta
+
+	// Packet entity fields.
+	ModelEntityDeltaBase
+	ModelEntityNumberLoDelta
+	ModelEntityNumberHiDelta
+	ModelEntityBitsXOR
+	ModelEntityMoreBitsXOR
+	ModelEntityEvenMoreBitsXOR
+	ModelEntityYetMoreBitsXOR
+	ModelEntityCoordSize
+	ModelEntityAngleSize
+	ModelEntityModelDelta
+	ModelEntityFrameDelta
+	ModelEntityColorMapDelta
+	ModelEntitySkinDelta
+	ModelEntityEffectsXOR
+	ModelEntityOriginXLoDelta
+	ModelEntityOriginXHiDelta
+	ModelEntityOriginYLoDelta
+	ModelEntityOriginYHiDelta
+	ModelEntityOriginZLoDelta
+	ModelEntityOriginZHiDelta
+	ModelEntityOriginByte2Delta
+	ModelEntityOriginByte3Delta
+	ModelEntityAngle1LoDelta
+	ModelEntityAngle1HiDelta
+	ModelEntityAngle2LoDelta
+	ModelEntityAngle2HiDelta
+	ModelEntityAngle3LoDelta
+	ModelEntityAngle3HiDelta
+	ModelEntityTailByte
+
+	// Record and tail lengths.
+	ModelRecordLengthSet
+	ModelRecordLengthCommand
+	ModelRecordLengthMultiple
+	ModelRecordLengthSingle
+	ModelRecordLengthStats
+	ModelRecordLengthAll
+	ModelTrailingLength
+	ModelEntityTailLength
+
+	// Player angles: previous prediction residual magnitude.
+	ModelPlayerPitchLoDeltaPrevSmall
+	ModelPlayerPitchHiDeltaPrevSmall
+	ModelPlayerPitchLoDeltaPrevMedium
+	ModelPlayerPitchHiDeltaPrevMedium
+	ModelPlayerPitchLoDeltaPrevLarge
+	ModelPlayerPitchHiDeltaPrevLarge
+	ModelPlayerYawLoDeltaPrevSmall
+	ModelPlayerYawHiDeltaPrevSmall
+	ModelPlayerYawLoDeltaPrevMedium
+	ModelPlayerYawHiDeltaPrevMedium
+	ModelPlayerYawLoDeltaPrevLarge
+	ModelPlayerYawHiDeltaPrevLarge
+
+	// Player origins: previous prediction residual magnitude.
+	ModelPlayerOriginXLoDeltaPrevSmall
+	ModelPlayerOriginXHiDeltaPrevSmall
+	ModelPlayerOriginXLoDeltaPrevMedium
+	ModelPlayerOriginXHiDeltaPrevMedium
+	ModelPlayerOriginXLoDeltaPrevLarge
+	ModelPlayerOriginXHiDeltaPrevLarge
+	ModelPlayerOriginYLoDeltaPrevSmall
+	ModelPlayerOriginYHiDeltaPrevSmall
+	ModelPlayerOriginYLoDeltaPrevMedium
+	ModelPlayerOriginYHiDeltaPrevMedium
+	ModelPlayerOriginYLoDeltaPrevLarge
+	ModelPlayerOriginYHiDeltaPrevLarge
+	ModelPlayerOriginZLoDeltaPrevSmall
+	ModelPlayerOriginZHiDeltaPrevSmall
+	ModelPlayerOriginZLoDeltaPrevMedium
+	ModelPlayerOriginZHiDeltaPrevMedium
+	ModelPlayerOriginZLoDeltaPrevLarge
+	ModelPlayerOriginZHiDeltaPrevLarge
+
+	// Entity numbers: previous delta magnitude.
+	ModelEntityNumberLoDeltaPrevSmall
+	ModelEntityNumberHiDeltaPrevSmall
+	ModelEntityNumberLoDeltaPrevMedium
+	ModelEntityNumberHiDeltaPrevMedium
+	ModelEntityNumberLoDeltaPrevLarge
+	ModelEntityNumberHiDeltaPrevLarge
+
+	// Entity origins: previous prediction residual magnitude.
+	ModelEntityOriginXLoDeltaPrevSmall
+	ModelEntityOriginXHiDeltaPrevSmall
+	ModelEntityOriginXLoDeltaPrevMedium
+	ModelEntityOriginXHiDeltaPrevMedium
+	ModelEntityOriginXLoDeltaPrevLarge
+	ModelEntityOriginXHiDeltaPrevLarge
+	ModelEntityOriginYLoDeltaPrevSmall
+	ModelEntityOriginYHiDeltaPrevSmall
+	ModelEntityOriginYLoDeltaPrevMedium
+	ModelEntityOriginYHiDeltaPrevMedium
+	ModelEntityOriginYLoDeltaPrevLarge
+	ModelEntityOriginYHiDeltaPrevLarge
+	ModelEntityOriginZLoDeltaPrevSmall
+	ModelEntityOriginZHiDeltaPrevSmall
+	ModelEntityOriginZLoDeltaPrevMedium
+	ModelEntityOriginZHiDeltaPrevMedium
+	ModelEntityOriginZLoDeltaPrevLarge
+	ModelEntityOriginZHiDeltaPrevLarge
+
+	// Previous operation context.
+	ModelOperationKindAfterRaw
+	ModelOperationKindAfterPlayer
+	ModelOperationKindAfterPacket
+	ModelOperationKindAfterDelta
+
+	// Record kind and body mode context.
+	ModelRecordKindAfter0
+	ModelRecordKindAfter1
+	ModelRecordKindAfter2
+	ModelRecordKindAfter3
+	ModelRecordKindAfter4
+	ModelRecordKindAfter5
+	ModelRecordKindAfter6
+	ModelRecordBodyModeKind1
+	ModelRecordBodyModeKind2
+	ModelRecordBodyModeKind3
+	ModelRecordBodyModeKind4
+	ModelRecordBodyModeKind5
+	ModelRecordBodyModeKind6
+
+	// Timestamps and destinations by record kind.
+	ModelTimestampKind1
+	ModelTimestampKind2
+	ModelTimestampKind3
+	ModelTimestampKind4
+	ModelTimestampKind5
+	ModelTimestampKind6
+	ModelCommandTargetKind1
+	ModelCommandTargetKind2
+	ModelCommandTargetKind3
+	ModelCommandTargetKind4
+	ModelCommandTargetKind5
+	ModelCommandTargetKind6
+
+	// Player index and nonzero timestamp context.
+	ModelPlayerIndexPrevSmall
+	ModelPlayerIndexPrevMedium
+	ModelPlayerIndexPrevLarge
+	ModelTimestampKind0PrevNonzero
+	ModelTimestampKind1PrevNonzero
+	ModelTimestampKind2PrevNonzero
+	ModelTimestampKind3PrevNonzero
+	ModelTimestampKind4PrevNonzero
+	ModelTimestampKind5PrevNonzero
+	ModelTimestampKind6PrevNonzero
+
+	// Entity angles: previous prediction residual magnitude.
+	ModelEntityAngle1LoDeltaPrevSmall
+	ModelEntityAngle1HiDeltaPrevSmall
+	ModelEntityAngle1LoDeltaPrevMedium
+	ModelEntityAngle1HiDeltaPrevMedium
+	ModelEntityAngle1LoDeltaPrevLarge
+	ModelEntityAngle1HiDeltaPrevLarge
+	ModelEntityAngle2LoDeltaPrevSmall
+	ModelEntityAngle2HiDeltaPrevSmall
+	ModelEntityAngle2LoDeltaPrevMedium
+	ModelEntityAngle2HiDeltaPrevMedium
+	ModelEntityAngle2LoDeltaPrevLarge
+	ModelEntityAngle2HiDeltaPrevLarge
+	ModelEntityAngle3LoDeltaPrevSmall
+	ModelEntityAngle3HiDeltaPrevSmall
+	ModelEntityAngle3LoDeltaPrevMedium
+	ModelEntityAngle3HiDeltaPrevMedium
+	ModelEntityAngle3LoDeltaPrevLarge
+	ModelEntityAngle3HiDeltaPrevLarge
+
+	// Player flags, frames, and coordinate high bytes.
+	ModelPlayerBitsLoXORPrevNonzero
+	ModelPlayerBitsHiXORPrevNonzero
+	ModelPlayerFrameDeltaPrevOne
+	ModelPlayerFrameDeltaPrevOther
+	ModelPlayerOriginXLoDeltaHighNonzero
+	ModelPlayerOriginYLoDeltaHighNonzero
+	ModelPlayerOriginZLoDeltaHighNonzero
+	ModelPlayerPitchLoDeltaHighNonzero
+	ModelPlayerYawLoDeltaHighNonzero
+	ModelPlayerRollLoDeltaHighNonzero
+
+	// Entity coordinate high bytes.
+	ModelEntityOriginXLoDeltaHighNonzero
+	ModelEntityOriginYLoDeltaHighNonzero
+	ModelEntityOriginZLoDeltaHighNonzero
+	ModelEntityAngle1LoDeltaHighNonzero
+	ModelEntityAngle2LoDeltaHighNonzero
+	ModelEntityAngle3LoDeltaHighNonzero
+
+	// Player angles: negative previous prediction residuals.
+	ModelPlayerPitchLoDeltaPrevSmallNegative
+	ModelPlayerPitchHiDeltaPrevSmallNegative
+	ModelPlayerPitchLoDeltaPrevMediumNegative
+	ModelPlayerPitchHiDeltaPrevMediumNegative
+	ModelPlayerPitchLoDeltaPrevLargeNegative
+	ModelPlayerPitchHiDeltaPrevLargeNegative
+	ModelPlayerYawLoDeltaPrevSmallNegative
+	ModelPlayerYawHiDeltaPrevSmallNegative
+	ModelPlayerYawLoDeltaPrevMediumNegative
+	ModelPlayerYawHiDeltaPrevMediumNegative
+	ModelPlayerYawLoDeltaPrevLargeNegative
+	ModelPlayerYawHiDeltaPrevLargeNegative
+
+	// Player origins: negative previous prediction residuals.
+	ModelPlayerOriginXLoDeltaPrevSmallNegative
+	ModelPlayerOriginXHiDeltaPrevSmallNegative
+	ModelPlayerOriginXLoDeltaPrevMediumNegative
+	ModelPlayerOriginXHiDeltaPrevMediumNegative
+	ModelPlayerOriginXLoDeltaPrevLargeNegative
+	ModelPlayerOriginXHiDeltaPrevLargeNegative
+	ModelPlayerOriginYLoDeltaPrevSmallNegative
+	ModelPlayerOriginYHiDeltaPrevSmallNegative
+	ModelPlayerOriginYLoDeltaPrevMediumNegative
+	ModelPlayerOriginYHiDeltaPrevMediumNegative
+	ModelPlayerOriginYLoDeltaPrevLargeNegative
+	ModelPlayerOriginYHiDeltaPrevLargeNegative
+	ModelPlayerOriginZLoDeltaPrevSmallNegative
+	ModelPlayerOriginZHiDeltaPrevSmallNegative
+	ModelPlayerOriginZLoDeltaPrevMediumNegative
+	ModelPlayerOriginZHiDeltaPrevMediumNegative
+	ModelPlayerOriginZLoDeltaPrevLargeNegative
+	ModelPlayerOriginZHiDeltaPrevLargeNegative
+
+	// Entity origins: negative previous prediction residuals.
+	ModelEntityOriginXLoDeltaPrevSmallNegative
+	ModelEntityOriginXHiDeltaPrevSmallNegative
+	ModelEntityOriginXLoDeltaPrevMediumNegative
+	ModelEntityOriginXHiDeltaPrevMediumNegative
+	ModelEntityOriginXLoDeltaPrevLargeNegative
+	ModelEntityOriginXHiDeltaPrevLargeNegative
+	ModelEntityOriginYLoDeltaPrevSmallNegative
+	ModelEntityOriginYHiDeltaPrevSmallNegative
+	ModelEntityOriginYLoDeltaPrevMediumNegative
+	ModelEntityOriginYHiDeltaPrevMediumNegative
+	ModelEntityOriginYLoDeltaPrevLargeNegative
+	ModelEntityOriginYHiDeltaPrevLargeNegative
+	ModelEntityOriginZLoDeltaPrevSmallNegative
+	ModelEntityOriginZHiDeltaPrevSmallNegative
+	ModelEntityOriginZLoDeltaPrevMediumNegative
+	ModelEntityOriginZHiDeltaPrevMediumNegative
+	ModelEntityOriginZLoDeltaPrevLargeNegative
+	ModelEntityOriginZHiDeltaPrevLargeNegative
+
+	// Entity angles: negative previous prediction residuals.
+	ModelEntityAngle1LoDeltaPrevSmallNegative
+	ModelEntityAngle1HiDeltaPrevSmallNegative
+	ModelEntityAngle1LoDeltaPrevMediumNegative
+	ModelEntityAngle1HiDeltaPrevMediumNegative
+	ModelEntityAngle1LoDeltaPrevLargeNegative
+	ModelEntityAngle1HiDeltaPrevLargeNegative
+	ModelEntityAngle2LoDeltaPrevSmallNegative
+	ModelEntityAngle2HiDeltaPrevSmallNegative
+	ModelEntityAngle2LoDeltaPrevMediumNegative
+	ModelEntityAngle2HiDeltaPrevMediumNegative
+	ModelEntityAngle2LoDeltaPrevLargeNegative
+	ModelEntityAngle2HiDeltaPrevLargeNegative
+	ModelEntityAngle3LoDeltaPrevSmallNegative
+	ModelEntityAngle3HiDeltaPrevSmallNegative
+	ModelEntityAngle3LoDeltaPrevMediumNegative
+	ModelEntityAngle3HiDeltaPrevMediumNegative
+	ModelEntityAngle3LoDeltaPrevLargeNegative
+	ModelEntityAngle3HiDeltaPrevLargeNegative
+
+	// Run counts, timestamp history, and extended entity flags.
+	ModelPlayerRunLengthDelta
+	ModelEntityCountDelta
+	ModelTimestampKind4PrevKind0
+	ModelTimestampKind4PrevKind1
+	ModelTimestampKind4PrevKind2
+	ModelTimestampKind4PrevKind3
+	ModelTimestampKind4PrevKind4
+	ModelTimestampKind4PrevKind5
+	ModelTimestampKind4PrevKind6
+	ModelTimestampKind6PrevKind0
+	ModelTimestampKind6PrevKind1
+	ModelTimestampKind6PrevKind2
+	ModelTimestampKind6PrevKind3
+	ModelTimestampKind6PrevKind4
+	ModelTimestampKind6PrevKind5
+	ModelTimestampKind6PrevKind6
+	ModelEntityEvenMorePresent
+
+	// Sound operations.
+	ModelOperationKindAfterSound
+	ModelSoundChannelLoDelta
+	ModelSoundChannelHiDelta
+	ModelSoundVolume
+	ModelSoundAttenuation
+	ModelSoundNumberDelta
+	ModelSoundCoordSize
+	ModelSoundCoordXByte0
+	ModelSoundCoordXByte1
+	ModelSoundCoordXByte2
+	ModelSoundCoordXByte3
+	ModelSoundCoordYByte0
+	ModelSoundCoordYByte1
+	ModelSoundCoordYByte2
+	ModelSoundCoordYByte3
+	ModelSoundCoordZByte0
+	ModelSoundCoordZByte1
+	ModelSoundCoordZByte2
+	ModelSoundCoordZByte3
+
+	// Temporary entity operations.
+	ModelOperationKindAfterTempEntity
+	ModelTempEntityType
+	ModelTempEntityCount
+	ModelTempEntityLoDelta
+	ModelTempEntityHiDelta
+	ModelTempEntityCoordSize
+	ModelTempEntityCoordXByte0
+	ModelTempEntityCoordXByte1
+	ModelTempEntityCoordXByte2
+	ModelTempEntityCoordXByte3
+	ModelTempEntityCoordYByte0
+	ModelTempEntityCoordYByte1
+	ModelTempEntityCoordYByte2
+	ModelTempEntityCoordYByte3
+	ModelTempEntityCoordZByte0
+	ModelTempEntityCoordZByte1
+	ModelTempEntityCoordZByte2
+	ModelTempEntityCoordZByte3
+
+	// Service operations with fixed sizes.
+	ModelOperationKindAfterFixed
+	ModelUpdateStatIndexDelta
+	ModelUpdateStatValueDelta
+	ModelUpdateStatLongIndexDelta
+	ModelUpdateStatLongDeltaByte0
+	ModelUpdateStatLongDeltaByte1
+	ModelUpdateStatLongDeltaByte2
+	ModelUpdateStatLongDeltaByte3
+	ModelFixedPlayerIndexDelta
+	ModelUpdateFragsLoDelta
+	ModelUpdateFragsHiDelta
+	ModelUpdatePingLoDelta
+	ModelUpdatePingHiDelta
+	ModelUpdatePLDelta
+	ModelMuzzleFlashLoDelta
+	ModelMuzzleFlashHiDelta
+
+	// Damage operations.
+	ModelOperationKindAfterDamage
+	ModelDamageArmor
+	ModelDamageBlood
+	ModelDamageCoordSize
+	ModelDamageHasPosition
+	ModelDamageCoordXByte0
+	ModelDamageCoordXByte1
+	ModelDamageCoordXByte2
+	ModelDamageCoordXByte3
+	ModelDamageCoordYByte0
+	ModelDamageCoordYByte1
+	ModelDamageCoordYByte2
+	ModelDamageCoordYByte3
+	ModelDamageCoordZByte0
+	ModelDamageCoordZByte1
+	ModelDamageCoordZByte2
+	ModelDamageCoordZByte3
+
+	// More specific previous operation contexts.
+	ModelOperationKindAfterCenterPrint
+	ModelOperationKindAfterStuffText
+	ModelOperationKindAfterPrint
+	ModelOperationKindAfterUpdateStat
+	ModelOperationKindAfterUpdateFrags
+	ModelOperationKindAfterUpdatePing
+	ModelOperationKindAfterUpdateStatLong
+	ModelOperationKindAfterMuzzleFlash
+	ModelOperationKindAfterUpdatePL
+
+	// Coordinate base selection.
+	ModelSoundCoordBase
+	ModelTempEntityBeamCoordBase
+	ModelDamageCoordBase
+
+	// Sound coordinates relative to an entity.
+	ModelSoundEntityCoordXByte0
+	ModelSoundEntityCoordXByte1
+	ModelSoundEntityCoordXByte2
+	ModelSoundEntityCoordXByte3
+	ModelSoundEntityCoordYByte0
+	ModelSoundEntityCoordYByte1
+	ModelSoundEntityCoordYByte2
+	ModelSoundEntityCoordYByte3
+	ModelSoundEntityCoordZByte0
+	ModelSoundEntityCoordZByte1
+	ModelSoundEntityCoordZByte2
+	ModelSoundEntityCoordZByte3
+
+	// Coordinate low bytes conditioned on nonzero high bytes.
+	ModelSoundCoordXLoHighNonzero
+	ModelSoundCoordYLoHighNonzero
+	ModelSoundCoordZLoHighNonzero
+	ModelSoundEntityCoordXLoHighNonzero
+	ModelSoundEntityCoordYLoHighNonzero
+	ModelSoundEntityCoordZLoHighNonzero
+	ModelTempEntityCoordXLoHighNonzero
+	ModelTempEntityCoordYLoHighNonzero
+	ModelTempEntityCoordZLoHighNonzero
+	ModelDamageCoordXLoHighNonzero
+	ModelDamageCoordYLoHighNonzero
+	ModelDamageCoordZLoHighNonzero
+
+	// Player/world sound and beam contexts.
+	ModelSoundNumberDeltaPlayer
+	ModelSoundNumberDeltaWorld
+	ModelSoundCoordBasePlayer
+	ModelSoundCoordBaseWorld
+	ModelTempEntityBeamCoordBasePlayer
+	ModelTempEntityBeamCoordBaseWorld
+
+	ModelCount
+)

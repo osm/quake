@@ -35,7 +35,8 @@ func newDecoder(buf []byte) *Decoder {
 }
 
 func NewPadded(buf []byte) *Decoder {
-	// Qizmo arithmetic streams permit four zero bytes of EOF padding.
+	// Ensure the initial four-byte code can be read. Qizmo arithmetic streams
+	// treat later reads beyond the encoded prefix as zero as well.
 	padded := make([]byte, len(buf)+4)
 	copy(padded, buf)
 	return newDecoder(padded)
